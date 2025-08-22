@@ -2,40 +2,21 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Zephyr STM32U5 Debug (External OpenOCD)",
+      "name": "Zephyr STM32U5 Debug (OpenOCD)",
       "type": "cortex-debug",
       "request": "launch",
       "cwd": "${workspaceRoot}",
       "executable": "${workspaceRoot}/build/zephyr/zephyr.elf",
 
-      // External OpenOCD mode (we run OpenOCD via tasks.json)
       "servertype": "external",
       "gdbTarget": "localhost:3333",
-
-      // MCU details
       "device": "STM32U585AI",
-      "interface": "swd",
-      "runToMain": true,
+      "svdFile": "${env:ZEPHYR_BASE}/modules/hal/stm32/stm32u5xx.svd",
 
-      // Zephyr SDK toolchain paths (FIXED)
-      "gdbPath": "/Users/david/proj/zephyr/zephyr-sdk/zephyr-sdk-0.17.4/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb",
-      "objdumpPath": "/Users/david/proj/zephyr/zephyr-sdk/zephyr-sdk-0.17.4/arm-zephyr-eabi/bin/arm-zephyr-eabi-objdump",
-      "nmPath": "/Users/david/proj/zephyr/zephyr-sdk/zephyr-sdk-0.17.4/arm-zephyr-eabi/bin/arm-zephyr-eabi-nm",
-
-      // Optional: SVD for peripheral register view
-      "svdFile": "/Users/david/proj/zephyr/zephyr-env/workspace/zephyr/modules/hal/stm32/stm32u5xx.svd",
-
-      // Launch OpenOCD first (background task)
       "preLaunchTask": "OpenOCD (B-U585I-IOT02A)",
+      "postDebugTask": "terminate OpenOCD",
 
-      // Reset + load firmware before debugging
-      "preLaunchCommands": [
-        "monitor reset halt",
-        "load"
-      ],
-      "postLaunchCommands": [
-        "monitor reset init"
-      ]
+      "gdbPath": "${env:ZEPHYR_SDK_INSTALL_DIR}/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb"
     }
   ]
 }
