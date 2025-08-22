@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Zephyr STM32U5 Debug (OpenOCD)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "cwd": "${workspaceRoot}",
+      "executable": "${workspaceRoot}/build/zephyr/zephyr.elf",
+
+      "servertype": "external",
+      "gdbTarget": "localhost:3333",
+      "device": "STM32U585AI",
+      "svdFile": "${env:ZEPHYR_BASE}/modules/hal/stm32/stm32u5xx.svd",
+
+      "preLaunchTask": "OpenOCD (B-U585I-IOT02A)",
+      "postDebugTask": "terminate OpenOCD",
+
+      "gdbPath": "${env:ZEPHYR_SDK_INSTALL_DIR}/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb"
+    }
+  ]
+}
