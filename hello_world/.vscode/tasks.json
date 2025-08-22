@@ -3,7 +3,8 @@
   "tasks": [
     {
   "label": "OpenOCD (B-U585I-IOT02A)",
-  "type": "shell",
+      "label": "OpenOCD (B-U585I-IOT02A)",
+      "type": "shell",
   "command": "openocd",
   "args": [
     "-f",
