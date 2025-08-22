@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "OpenOCD (B-U585I-IOT02A)",
+      "type": "shell",
+      "command": "/opt/homebrew/bin/openocd",
+      "args": [
+        "-f", "/Users/david/proj/zephyr/zephyr-env/workspace/zephyr/boards/st/b_u585i_iot02a/support/openocd.cfg"
+      ],
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": [
+          {
+            "regexp": ".",
+            "file": 1,
+            "location": 2,
+            "message": 3
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "Info : Listening on port 3333 for gdb connections"
+        }
+      }
+    }
+  ]
+}
