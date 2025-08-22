@@ -11,7 +11,14 @@ export ZEPHYR_BASE="$HOME/proj/zephyr/zephyr-env/workspace/zephyr"
 # ------------------------------------------------------------------
 # Zephyr SDK
 # ------------------------------------------------------------------
-export ZEPHYR_SDK_INSTALL_DIR="$HOME/proj/zephyr/zephyr-sdk/zephyr-sdk-0.17.4"
+# Dynamically detect the latest installed Zephyr SDK version
+ZEPHYR_SDK_PARENT="$HOME/proj/zephyr/zephyr-sdk"
+ZEPHYR_SDK_INSTALL_DIR="$(ls -d "${ZEPHYR_SDK_PARENT}"/zephyr-sdk-* 2>/dev/null | sort -V | tail -n 1)"
+if [ -z "$ZEPHYR_SDK_INSTALL_DIR" ]; then
+    echo "❌ No Zephyr SDK installation found in $ZEPHYR_SDK_PARENT" >&2
+    return 1 2>/dev/null || exit 1
+fi
+export ZEPHYR_SDK_INSTALL_DIR
 export ZEPHYR_TOOLCHAIN_VARIANT=zephyr
 
 # ------------------------------------------------------------------
