@@ -23,7 +23,14 @@ fi
 export PATH="$HOME/.local/bin:$PATH"
 export PATH="/opt/ST/STM32CubeCLT_1.19.0/STM32CubeProgrammer/bin:$PATH"
 # IDF export normally sets these; leaving here as helpful extras:
-export PATH="$HOME/.espressif/tools/xtensa-esp-elf/"*/xtensa-esp-elf/bin:$PATH
+# Robustly add xtensa-esp-elf toolchain bin to PATH (handles multiple/zero matches)
+XTENSA_ESP_ELF_BIN_DIRS=$(find "$HOME/.espressif/tools/xtensa-esp-elf" -type d -name 'xtensa-esp-elf' -prune -exec find {} -type d -name bin \; 2>/dev/null)
+if [ -n "$XTENSA_ESP_ELF_BIN_DIRS" ]; then
+  # Add all found bin dirs to PATH
+  while IFS= read -r dir; do
+    export PATH="$dir:$PATH"
+  done <<< "$XTENSA_ESP_ELF_BIN_DIRS"
+fi
 
 # ---- ESP-IDF export (auto) ----
 if [ -d "$IDF_PATH" ] && [ -f "$IDF_PATH/export.sh" ]; then
