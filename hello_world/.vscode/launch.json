@@ -11,7 +11,7 @@
       "servertype": "external",
       "gdbTarget": "localhost:3333",
       "device": "STM32U585AI",
-      "svdFile": "${env:ZEPHYR_BASE}/modules/hal/stm32/stm32u5xx.svd",
+      "svdFile": "${workspaceRoot}/configs/stm32u575.svd",
 
       "preLaunchTask": "OpenOCD (B-U585I-IOT02A)",
       "postDebugTask": "terminate OpenOCD",
