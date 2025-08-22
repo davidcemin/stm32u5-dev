@@ -9,7 +9,7 @@
 
 int main(void)
 {
-    while(1) {
+    while (1) {
         printf("Hello World! %s\n", CONFIG_BOARD_TARGET);
         k_sleep(K_SECONDS(1));
     }
