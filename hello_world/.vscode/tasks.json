@@ -4,7 +4,7 @@
     {
       "label": "OpenOCD (B-U585I-IOT02A)",
       "type": "shell",
-  "command": "openocd",
+      "command": "openocd",
       "args": [
     "-f",
     "${env:ZEPHYR_BASE}/boards/st/b_u585i_iot02a/support/openocd.cfg"
