@@ -50,6 +50,7 @@ echo "   Zephyr base:    $ZEPHYR_BASE"
 echo "   SDK:            $ZEPHYR_SDK_INSTALL_DIR"
 echo "   Toolchain:      $(which arm-zephyr-eabi-gcc)"
 echo "   Toolchain:      $(command -v arm-zephyr-eabi-gcc || echo 'not found')"
+echo "   Toolchain:      $(command -v arm-zephyr-eabi-gcc || echo 'not found')"
 echo "   GDB:            $(command -v arm-zephyr-eabi-gdb || echo 'not found')"
 echo "   OpenOCD:        $(command -v openocd || echo 'not found')"
 
