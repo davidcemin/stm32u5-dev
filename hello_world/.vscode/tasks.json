@@ -11,7 +11,7 @@
         "-f",
         "${env:ZEPHYR_BASE}/boards/st/b_u585i_iot02a/support/openocd.cfg"
       ],
-  "isBackground": true,
+      "isBackground": true,
   "problemMatcher": {
     "pattern": [
       {
