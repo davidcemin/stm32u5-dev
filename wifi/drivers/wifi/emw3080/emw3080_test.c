@@ -13,6 +13,9 @@
 
 LOG_MODULE_REGISTER(wifi_test, CONFIG_LOG_DEFAULT_LEVEL);
 
+#include "emw3080.h"
+#include "emw3080_socket.h"
+
 /* Forward declaration - defined in emw3080_net.c */
 extern const struct device *get_emw3080_net_device(void);
 
@@ -20,9 +23,53 @@ extern const struct device *get_emw3080_net_device(void);
 #define WIFI_SSID "YourWiFiSSID"
 #define WIFI_PSK "YourWiFiPassword"
 
+/* Test AT command functionality */
+int emw3080_test_at_commands(void)
+{
+    LOG_INF("Testing EMW3080 AT commands");
+    
+    /* Get the device instance */
+    const struct device *dev = get_emw3080_device();
+    if (!dev) {
+        LOG_ERR("EMW3080 device not found");
+        return -ENODEV;
+    }
+    
+    struct emw3080_data *data = dev->data;
+    if (!data) {
+        LOG_ERR("EMW3080 device data not found");
+        return -EINVAL;
+    }
+    
+    /* Test simple AT command */
+    char resp[128];
+    LOG_INF("Testing basic AT command");
+    /* Increase timeout to 5000ms (5 seconds) */
+    int ret = emw3080_send_at_cmd(data, "AT\r\n", 4, resp, sizeof(resp), 5000);
+    if (ret < 0) {
+        LOG_ERR("Failed to send AT command: %d (%s)", ret, strerror(-ret));
+        return ret;
+    }
+    LOG_INF("AT command response: %s", resp);
+    
+    /* Test multi-connection mode */
+    LOG_INF("Testing multi-connection mode");
+    char cmd[32];
+    snprintf(cmd, sizeof(cmd), emw3080_cmd_set_multi_conn, 1);
+    /* Increase timeout to 5000ms (5 seconds) */
+    ret = emw3080_send_at_cmd(data, cmd, strlen(cmd), resp, sizeof(resp), 5000);
+    if (ret < 0) {
+        LOG_ERR("Failed to set multi-connection mode: %d (%s)", ret, strerror(-ret));
+        return ret;
+    }
+    LOG_INF("Multi-connection mode response: %s", resp);
+    
+    return 0;
+}
+
 /* Function to handle WiFi events */
 static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb,
-                                  uint32_t mgmt_event, struct net_if *iface)
+                                  uint64_t mgmt_event, struct net_if *iface)
 {
     switch (mgmt_event) {
     case NET_EVENT_WIFI_CONNECT_RESULT:
@@ -42,7 +89,7 @@ static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb,
         break;
         
     default:
-        LOG_DBG("Unhandled WiFi event: 0x%08x", mgmt_event);
+        LOG_DBG("Unhandled WiFi event: 0x%016llx", mgmt_event);
         break;
     }
 }
@@ -55,7 +102,9 @@ void test_wifi_l2_init(void)
     int ret;
     
     /* Initialize event callback */
-    net_mgmt_init_event_callback(&wifi_cb, wifi_mgmt_event_handler,
+    /* Use a cast to handle the uint32_t vs uint64_t type difference in newer Zephyr */
+    net_mgmt_init_event_callback(&wifi_cb, 
+                                (net_mgmt_event_handler_t)wifi_mgmt_event_handler,
                                 NET_EVENT_WIFI_CONNECT_RESULT |
                                 NET_EVENT_WIFI_DISCONNECT_RESULT |
                                 NET_EVENT_IPV4_ADDR_ADD);

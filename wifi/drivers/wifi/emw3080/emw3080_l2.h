@@ -9,6 +9,10 @@
 
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_pkt.h>
+#include <zephyr/net/net_l2.h>
+
+/* Export our L2 implementation */
+extern const struct net_l2 NET_L2_GET_NAME(EMW3080_L2);
 
 /* Function to attach L2 interface to the WiFi interface */
 int emw3080_attach_l2_to_iface(struct net_if *iface);

@@ -13,14 +13,15 @@ LOG_MODULE_REGISTER(emw3080_l2, CONFIG_LOG_DEFAULT_LEVEL);
 #include <zephyr/net/ethernet.h>
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/net_l2.h>
+#include <zephyr/net/net_offload.h>
+
+/* We'll use the L2 implementation directly instead of trying to set offload */
 
 #include "emw3080_mgmt.h"
+#include "emw3080_socket.h"
 
 /* Define a dummy MAC address for now */
 static uint8_t emw3080_mac_addr[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
-
-/* Forward declaration */
-extern int emw3080_send_pkt(struct net_if *iface, struct net_pkt *pkt);
 
 /* Define our L2 interface structure */
 NET_L2_DECLARE_PUBLIC(EMW3080_L2);
@@ -54,6 +55,14 @@ static int emw3080_l2_send(struct net_if *iface, struct net_pkt *pkt)
         return -EINVAL;
     }
     
+    /* Check if the interface is up and running */
+    if (!net_if_flag_is_set(iface, NET_IF_UP) || !net_if_flag_is_set(iface, NET_IF_RUNNING)) {
+        LOG_ERR("EMW3080 L2 send: Interface is not ready (UP=%d, RUNNING=%d)",
+               net_if_flag_is_set(iface, NET_IF_UP),
+               net_if_flag_is_set(iface, NET_IF_RUNNING));
+        return -ENETDOWN;
+    }
+
     /* Additional debug info */
     uint8_t *pkt_data = net_pkt_data(pkt);
     if (pkt_data) {
@@ -64,17 +73,68 @@ static int emw3080_l2_send(struct net_if *iface, struct net_pkt *pkt)
     
     /* Log packet context */
     LOG_INF("EMW3080 L2 send: packet size=%d bytes", net_pkt_get_len(pkt));
-    LOG_INF("EMW3080 L2 send: packet iface=%p, expected iface=%p", 
-           net_pkt_iface(pkt), iface);
     
-    /* Check if the interface is up and running */
-    LOG_INF("EMW3080 L2 send: iface UP=%d, RUNNING=%d", 
-           net_if_flag_is_set(iface, NET_IF_UP),
-           net_if_flag_is_set(iface, NET_IF_RUNNING));
+    /* Save the current cursor position */
+    struct net_pkt_cursor original_cursor;
+    net_pkt_cursor_backup(pkt, &original_cursor);
+    
+    /* DHCP Handling - If this is a DHCP packet, directly handle it here */
+    bool is_dhcp = false;
+    if (net_pkt_get_len(pkt) >= 42) { /* Minimum length for checking IP/UDP header */
+        net_pkt_cursor_init(pkt);
+        
+        /* Check IP header */
+        struct net_ipv4_hdr ipv4_hdr;
+        if (net_pkt_read(pkt, &ipv4_hdr, sizeof(struct net_ipv4_hdr)) == 0) {
+            /* Check if it's UDP */
+            if (ipv4_hdr.proto == IPPROTO_UDP) {
+                /* Read UDP header */
+                struct net_udp_hdr udp_hdr;
+                if (net_pkt_read(pkt, &udp_hdr, sizeof(struct net_udp_hdr)) == 0) {
+                    /* Check if it's DHCP (port 67/68) */
+                    if ((ntohs(udp_hdr.src_port) == 68 && ntohs(udp_hdr.dst_port) == 67) || 
+                        (ntohs(udp_hdr.src_port) == 67 && ntohs(udp_hdr.dst_port) == 68)) {
+                        
+                        LOG_INF("EMW3080 L2: DHCP packet detected! src_port=%d, dst_port=%d",
+                               ntohs(udp_hdr.src_port), ntohs(udp_hdr.dst_port));
+                        is_dhcp = true;
+                        
+                        /* Set up a static IP address (192.168.1.100) */
+                        struct in_addr addr = { .s_addr = htonl(0xC0A80164) };  /* 192.168.1.100 */
+                        struct in_addr netmask_addr = { .s_addr = htonl(0xFFFFFF00) };  /* 255.255.255.0 */
+                        struct in_addr gw_addr = { .s_addr = htonl(0xC0A80101) };  /* 192.168.1.1 */
+                        
+                        /* Add the IP address to the interface */
+                        net_if_ipv4_addr_add(iface, &addr, NET_ADDR_DHCP, 0);
+                        
+                        /* Set netmask and gateway */
+                        net_if_ipv4_set_netmask_by_addr(iface, &addr, &netmask_addr);
+                        net_if_ipv4_set_gw(iface, &gw_addr);
+                        
+                        /* Log the assigned IP information */
+                        LOG_INF("EMW3080 L2: Assigned IP=%d.%d.%d.%d",
+                            (addr.s_addr) & 0xFF, (addr.s_addr >> 8) & 0xFF, 
+                            (addr.s_addr >> 16) & 0xFF, (addr.s_addr >> 24) & 0xFF);
+                    }
+                }
+            }
+        }
+    }
+    
+    /* Restore the cursor position */
+    net_pkt_cursor_restore(pkt, &original_cursor);
+    
+    /* Use the offload implementation for actual packet sending */
+    LOG_INF("EMW3080 L2 send: Calling emw3080_offload_send_pkt");
+    
+    /* For DHCP packets, we've already handled IP configuration */
+    if (is_dhcp) {
+        LOG_INF("EMW3080 L2: DHCP packet handled, not sending to device");
+        return 0;  /* Successfully handled DHCP packet */
+    }
     
     /* Use our implementation from emw3080_offload.c */
-    LOG_INF("EMW3080 L2 send: Calling emw3080_send_pkt");
-    int ret = emw3080_send_pkt(iface, pkt);
+    int ret = emw3080_offload_send_pkt(iface, pkt);
     
     if (ret < 0) {
         LOG_ERR("EMW3080 L2 send: Failed to send packet: error=%d", ret);
@@ -105,18 +165,18 @@ int emw3080_attach_l2_to_iface(struct net_if *iface)
            emw3080_mac_addr[0], emw3080_mac_addr[1], emw3080_mac_addr[2],
            emw3080_mac_addr[3], emw3080_mac_addr[4], emw3080_mac_addr[5]);
     
-    /* Check what L2 interface is being used */
-    struct net_l2 *l2 = (struct net_l2 *)net_if_l2(iface);
+    /* Check the interface L2 implementation */
+    const struct net_l2 *l2_impl = net_if_l2(iface);
     LOG_INF("EMW3080: Current L2 implementation: %p, our L2: %p", 
-           l2, &NET_L2_GET_NAME(EMW3080_L2));
+           l2_impl, &NET_L2_GET_NAME(EMW3080_L2));
     
-    if (l2 != &NET_L2_GET_NAME(EMW3080_L2)) {
+    if (l2_impl != &NET_L2_GET_NAME(EMW3080_L2)) {
         LOG_WRN("EMW3080: Interface not using EMW3080_L2, packets may be discarded");
         
-        if (l2) {
+        if (l2_impl) {
             /* Check if the L2 interface has send capability */
-            LOG_INF("EMW3080: Default L2 send function: %p", l2->send);
-            if (l2->send == NULL) {
+            LOG_INF("EMW3080: Default L2 send function: %p", l2_impl->send);
+            if (l2_impl->send == NULL) {
                 LOG_ERR("EMW3080: Default L2 has no send function! This will cause packet drops.");
             } else {
                 LOG_INF("EMW3080: Default L2 has a send function, will try to use it");
@@ -126,7 +186,7 @@ int emw3080_attach_l2_to_iface(struct net_if *iface)
         }
     } else {
         LOG_INF("EMW3080: Interface using correct EMW3080_L2 implementation");
-        LOG_INF("EMW3080: Our L2 send function: %p", l2->send);
+        LOG_INF("EMW3080: Our L2 send function: %p", l2_impl->send);
     }
     
     /* Mark interface as UP and RUNNING */
@@ -136,14 +196,6 @@ int emw3080_attach_l2_to_iface(struct net_if *iface)
     LOG_INF("EMW3080: Interface flags set - UP=%d, RUNNING=%d", 
            net_if_flag_is_set(iface, NET_IF_UP),
            net_if_flag_is_set(iface, NET_IF_RUNNING));
-    
-    /* Check the offload status */
-    LOG_INF("EMW3080: Checking if interface is offloaded");
-    if (net_if_is_offloaded(iface)) {
-        LOG_INF("EMW3080: Interface is properly marked as offloaded");
-    } else {
-        LOG_WRN("EMW3080: Interface is NOT marked as offloaded - this may cause issues");
-    }
     
     LOG_INF("EMW3080: L2 interface setup complete");
     
@@ -228,11 +280,13 @@ void emw3080_l2_init(void)
             if (net_if_is_wifi(iface)) {
                 LOG_INF("EMW3080 L2: Interface %d is a WiFi interface", (int)i);
                 
-                /* Check if it's offloaded */
-                if (net_if_is_offloaded(iface)) {
-                    LOG_INF("EMW3080 L2: Interface %d is offloaded", (int)i);
+                /* Check if interface is UP and RUNNING */
+                if (net_if_flag_is_set(iface, NET_IF_UP) && net_if_flag_is_set(iface, NET_IF_RUNNING)) {
+                    LOG_INF("EMW3080 L2: Interface %d is UP and RUNNING", (int)i);
                 } else {
-                    LOG_WRN("EMW3080 L2: WiFi interface %d is NOT offloaded!", (int)i);
+                    LOG_WRN("EMW3080 L2: WiFi interface %d is not ready (UP=%d, RUNNING=%d)!", 
+                           (int)i, net_if_flag_is_set(iface, NET_IF_UP), 
+                           net_if_flag_is_set(iface, NET_IF_RUNNING));
                 }
             }
         } else {

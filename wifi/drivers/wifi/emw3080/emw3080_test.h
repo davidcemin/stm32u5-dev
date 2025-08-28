@@ -10,4 +10,7 @@
 /* Function to test WiFi L2 implementation */
 void test_wifi_l2_init(void);
 
+/* Test AT command functionality */
+int emw3080_test_at_commands(void);
+
 #endif /* EMW3080_TEST_H */

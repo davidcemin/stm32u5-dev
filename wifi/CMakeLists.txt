@@ -26,6 +26,8 @@ target_sources(app PRIVATE
     drivers/wifi/emw3080/emw3080_net.c
     drivers/wifi/emw3080/emw3080_mgmt.c
     drivers/wifi/emw3080/emw3080_l2.c
+    drivers/wifi/emw3080/emw3080_socket.c
+    drivers/wifi/emw3080/emw3080_test.c
 )
 
 # Ensure we use networking configuration

@@ -343,7 +343,16 @@ int main(void)
     LOG_INF("net iface                    - Show network interfaces");
     LOG_INF("net ipv4                     - Show IPv4 addresses");
     
-    /* NOTE: L2 test temporarily disabled until linking issues are fixed */
+    /* Test our AT command functionality */
+    LOG_INF("Testing AT commands...");
+    extern int emw3080_debug_at_commands(void);
+    ret = emw3080_debug_at_commands();
+    if (ret == 0) {
+        LOG_INF("AT command test successful");
+    } else {
+        LOG_ERR("AT command test failed: %d", ret);
+    }
+
     LOG_INF("WiFi L2 implementation active");
 }    LOG_INF("Initialization complete - WiFi sample is running");
     return 0;

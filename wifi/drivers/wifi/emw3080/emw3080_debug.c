@@ -1,5 +1,8 @@
 /*
- * Copyright (c) 2025 David Cemin
+ * Copyright (#include <zephyr/sys/printk.h>
+
+#include "emw3080.h"
+#include "emw3080_socket.h"2025 David Cemin
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -13,8 +16,11 @@ LOG_MODULE_REGISTER(emw3080_debug, CONFIG_LOG_DEFAULT_LEVEL);
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/sys/printk.h>
+
+#include "emw3080.h"
 
 /* This file adds additional debugging to help diagnose EMW3080 driver issues */
 
@@ -96,4 +102,63 @@ void emw3080_debug_check_initialization(void)
     LOG_INF("3. The device tree binding is correctly processed");
     
     LOG_INF("=== EMW3080 check complete ===");
+}
+
+/* Debug function to test AT command functionality */
+int emw3080_debug_at_commands(void)
+{
+    const struct device *dev = get_emw3080_device();
+    if (!dev) {
+        LOG_ERR("EMW3080 device not found");
+        return -ENODEV;
+    }
+    
+    struct emw3080_data *data = dev->data;
+    if (!data) {
+        LOG_ERR("EMW3080 device data not found");
+        return -EINVAL;
+    }
+    
+    /* If there's no UART device, we can't send AT commands */
+    if (!data->uart || !device_is_ready(data->uart)) {
+        LOG_ERR("UART device not available or not ready");
+        return -ENODEV;
+    }
+    
+    LOG_INF("=== Testing AT commands ===");
+    
+    /* Test basic AT command */
+    char resp[128];
+    int ret = emw3080_send_at_cmd(data, "AT\r\n", 4, resp, sizeof(resp), 2000);
+    LOG_INF("AT command result: %d", ret);
+    if (ret == 0) {
+        LOG_INF("Response: %s", resp);
+    } else {
+        LOG_ERR("Failed to execute AT command");
+    }
+    
+    /* Test setting multi-connection mode */
+    LOG_INF("Testing multi-connection mode");
+    char cmd[32];
+    snprintf(cmd, sizeof(cmd), emw3080_cmd_set_multi_conn, 1);
+    ret = emw3080_send_at_cmd(data, cmd, strlen(cmd), resp, sizeof(resp), 2000);
+    LOG_INF("CIPMUX command result: %d", ret);
+    if (ret == 0) {
+        LOG_INF("Response: %s", resp);
+    } else {
+        LOG_ERR("Failed to set multi-connection mode");
+    }
+    
+    /* Try to get IP status */
+    LOG_INF("Getting IP status");
+    ret = emw3080_send_at_cmd(data, "AT+CIPSTATUS\r\n", 14, resp, sizeof(resp), 2000);
+    LOG_INF("CIPSTATUS command result: %d", ret);
+    if (ret == 0) {
+        LOG_INF("Response: %s", resp);
+    } else {
+        LOG_ERR("Failed to get IP status");
+    }
+    
+    LOG_INF("=== AT command test complete ===");
+    return ret;
 }
