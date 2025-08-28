@@ -20,9 +20,19 @@ LOG_MODULE_REGISTER(emw3080_net, CONFIG_LOG_DEFAULT_LEVEL);
 #include "emw3080_offload_dev.h"
 #include "emw3080_mgmt.h"
 
-/* Forward declarations from emw3080.c */
-extern const struct net_wifi_mgmt_offload emw3080_api;
+/* Forward declarations */
 extern int emw3080_init_with_uart(const struct device *dev, const struct device *uart_dev);
+extern const struct net_offload emw3080_offload;
+
+/* Forward declarations of internal functions - Must be at the top! */
+static void emw3080_net_iface_init(struct net_if *iface);
+static enum offloaded_net_if_types emw3080_get_type(void);
+static int emw3080_enable(const struct net_if *iface, bool state);
+static int emw3080_net_device_init(const struct device *dev);
+static int emw3080_scan(const struct device *dev, struct wifi_scan_params *params, scan_result_cb_t cb);
+static int emw3080_connect(const struct device *dev, struct wifi_connect_req_params *params);
+static int emw3080_disconnect(const struct device *dev);
+static int emw3080_get_status(const struct device *dev, struct wifi_iface_status *status);
 
 /* Define data structure for network driver */
 struct emw3080_net_data {
@@ -36,48 +46,44 @@ static struct emw3080_net_data emw3080_net_dev_data = {
     .mac_addr = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 },
 };
 
-/* Basic initialization function for the network interface */
-static int emw3080_net_device_init(const struct device *dev)
+/* Define the WiFi management operations */
+static const struct wifi_mgmt_ops emw3080_wifi_mgmt_ops = {
+    .scan = emw3080_scan,
+    .connect = emw3080_connect,
+    .disconnect = emw3080_disconnect,
+    .iface_status = emw3080_get_status,
+};
+
+/* Define the proper interface API with get_type implementation for WiFi detection */
+static const struct offloaded_if_api offloaded_if = {
+    .iface_api.init = emw3080_net_iface_init,
+    .get_type = emw3080_get_type,  /* This is critical for WiFi identification */
+    .enable = emw3080_enable,
+};
+
+/* WiFi management offload structure - this is exported for external code */
+const struct net_wifi_mgmt_offload emw3080_mgmt_api = {
+    .wifi_iface = {
+        .iface_api.init = emw3080_net_iface_init,
+        .get_type = emw3080_get_type,
+        .enable = emw3080_enable,
+    },
+    .wifi_mgmt_api = &emw3080_wifi_mgmt_ops,
+};
+
+/* Function to identify this device as WiFi - crucial for proper identification */
+static enum offloaded_net_if_types emw3080_get_type(void)
 {
-    LOG_INF("EMW3080 network device initializing");
-    
-    /* Directly get UART4 */
-    const struct device *uart = DEVICE_DT_GET(DT_NODELABEL(uart4));
-    if (!uart || !device_is_ready(uart)) {
-        LOG_ERR("UART4 not available");
-        return -ENODEV;
-    }
-    
-    struct emw3080_net_data *data = dev->data;
-    data->uart = uart;
-    
-    /* This initialization will be called again by the networking stack */
-    LOG_INF("EMW3080 network device ready");
-    return 0;
+    LOG_INF("get_type called, reporting device as L2_OFFLOADED_NET_IF_TYPE_WIFI (%d)", 
+           L2_OFFLOADED_NET_IF_TYPE_WIFI);
+    return L2_OFFLOADED_NET_IF_TYPE_WIFI;
 }
 
-/* Function to initialize the interface */
-static void emw3080_net_iface_init(struct net_if *iface)
+/* Function to enable/disable the interface */
+static int emw3080_enable(const struct net_if *iface, bool state)
 {
-    const struct device *dev = net_if_get_device(iface);
-    struct emw3080_net_data *data = dev->data;
-    
-    LOG_INF("EMW3080 interface initialized");
-    
-    /* Set MAC address */
-    net_if_set_link_addr(iface, data->mac_addr, sizeof(data->mac_addr), NET_LINK_ETHERNET);
-    
-    /* Save reference to interface */
-    data->iface = iface;
-    
-    /* Set the interface in the WiFi management module */
-    emw3080_mgmt_set_iface(iface);
-    
-    /* Set net_if attributes for WIFI management */
-    net_if_flag_set(iface, NET_IF_UP);
-    net_if_flag_set(iface, NET_IF_RUNNING);
-    
-    LOG_INF("EMW3080 WiFi interface registered and ready");
+    LOG_INF("Enable/disable interface: %s", state ? "UP" : "DOWN");
+    return 0;  /* Always successful for now */
 }
 
 /* WiFi management API implementations - delegates to emw3080_mgmt module */
@@ -106,53 +112,85 @@ static int emw3080_get_status(const struct device *dev, struct wifi_iface_status
     return emw3080_mgmt_get_status(dev, status);
 }
 
-/* Function to identify this device as WiFi - this is crucial for
- * proper identification by net_if_is_wifi() and net_off_is_wifi_offloaded()
- */
-static enum offloaded_net_if_types emw3080_get_type(void)
+/* Function to initialize the interface */
+static void emw3080_net_iface_init(struct net_if *iface)
 {
-    LOG_INF("get_type called, reporting device as L2_OFFLOADED_NET_IF_TYPE_WIFI");
-    return L2_OFFLOADED_NET_IF_TYPE_WIFI;
+    const struct device *dev = net_if_get_device(iface);
+    struct emw3080_net_data *data = dev->data;
+    
+    LOG_INF("EMW3080 interface initialized");
+    
+    /* Verify the device API pointer */
+    LOG_INF("Device API is at %p", dev->api);
+    
+    /* Check if the API structure has our get_type function */
+    const struct offloaded_if_api *api = (const struct offloaded_if_api *)dev->api;
+    if (api && api->get_type) {
+        LOG_INF("Device API has get_type function - GOOD");
+        enum offloaded_net_if_types type = api->get_type();
+        LOG_INF("API get_type() returns: %d (WiFi=%d)", 
+               type, (type == L2_OFFLOADED_NET_IF_TYPE_WIFI) ? 1 : 0);
+    } else {
+        LOG_ERR("Device API does not have valid get_type function!");
+    }
+    
+    /* Set MAC address */
+    net_if_set_link_addr(iface, data->mac_addr, sizeof(data->mac_addr), NET_LINK_ETHERNET);
+    
+    /* Save reference to interface */
+    data->iface = iface;
+    
+    /* Set the interface in the WiFi management module */
+    emw3080_mgmt_set_iface(iface);
+    
+    /* Initialize WiFi management functionality - critical for WiFi identification */
+    emw3080_mgmt_init();
+    
+    /* Set net_if attributes for WIFI management */
+    net_if_flag_set(iface, NET_IF_UP);
+    net_if_flag_set(iface, NET_IF_RUNNING);
+    
+    /* Check if the interface is identified as WiFi */
+    bool is_wifi = net_if_is_wifi(iface);
+    bool is_offloaded_wifi = net_off_is_wifi_offloaded(iface);
+    
+    LOG_INF("EMW3080 WiFi interface registered and ready. WiFi=%d, Offloaded WiFi=%d",
+           is_wifi, is_offloaded_wifi);
 }
 
-/* Function to enable/disable the interface */
-static int emw3080_enable(const struct net_if *iface, bool state)
+/* Basic initialization function for the network interface */
+static int emw3080_net_device_init(const struct device *dev)
 {
-    LOG_INF("Enable/disable interface: %s", state ? "UP" : "DOWN");
-    return 0;  /* Always successful for now */
+    LOG_INF("EMW3080 network device initializing");
+    
+    /* Log device API info */
+    LOG_INF("Device API address: %p", dev->api);
+    
+    /* Check our get_type function result */
+    enum offloaded_net_if_types type = emw3080_get_type();
+    LOG_INF("Our get_type function returns: %d (WiFi=%d)", 
+           type, (type == L2_OFFLOADED_NET_IF_TYPE_WIFI) ? 1 : 0);
+    
+    /* Directly get UART4 */
+    const struct device *uart = DEVICE_DT_GET(DT_NODELABEL(uart4));
+    if (!uart || !device_is_ready(uart)) {
+        LOG_ERR("UART4 not available");
+        return -ENODEV;
+    }
+    
+    struct emw3080_net_data *data = dev->data;
+    data->uart = uart;
+    
+    /* This initialization will be called again by the networking stack */
+    LOG_INF("EMW3080 network device ready");
+    return 0;
 }
-
-/* Network offload API from emw3080_offload.c */
-extern const struct net_offload emw3080_offload;
-
-/* Define the WiFi management operations */
-static const struct wifi_mgmt_ops emw3080_wifi_mgmt_ops = {
-    .scan = emw3080_scan,
-    .connect = emw3080_connect,
-    .disconnect = emw3080_disconnect,
-    .iface_status = emw3080_get_status,
-};
-
-/* The net_if_api needs to be the first field in this struct to 
- * ensure proper type casting in Zephyr's networking stack.
- * This structure is crucial - it's what makes our interface identifiable as a WiFi device
- */
-static const struct offloaded_if_api emw3080_mgmt_if_api = {
-    .iface_api.init = emw3080_net_iface_init,
-    .get_type = emw3080_get_type,
-    .enable = emw3080_enable,
-};
-
-/* WiFi management offload structure - this is the structure used by the 
- * WiFi management subsystem to interface with our driver
- */
-static struct net_wifi_mgmt_offload emw3080_mgmt_api = {
-    .wifi_iface = emw3080_mgmt_if_api,
-    .wifi_mgmt_api = &emw3080_wifi_mgmt_ops,
-};
 
 /* Create the network device - this is the registration that integrates 
- * our driver with the Zephyr networking subsystem
+ * our driver with the Zephyr networking subsystem.
+ * 
+ * We pass &offloaded_if to the macro, which contains both the interface init function 
+ * and the get_type function needed for WiFi identification.
  */
 NET_DEVICE_OFFLOAD_INIT(emw3080_net,
                         "EMW3080_NET",
@@ -161,7 +199,7 @@ NET_DEVICE_OFFLOAD_INIT(emw3080_net,
                         &emw3080_net_dev_data,
                         NULL,
                         CONFIG_WIFI_INIT_PRIORITY,
-                        &emw3080_mgmt_api.wifi_iface,
+                        &offloaded_if,
                         1500);  /* MTU */
 
 /* Function to be called from main to check if network device is ready */
