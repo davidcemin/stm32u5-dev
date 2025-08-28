@@ -90,6 +90,9 @@ int emw3080_send_at_cmd(struct emw3080_data *data,
                       char *resp_buf, size_t resp_len,
                       uint32_t timeout_ms);
 
+/* Parse IP address information from response */
+void emw3080_parse_ip_info(struct emw3080_data *data, char *resp);
+
 /* Get the device pointer for EMW3080 driver */
 const struct device *get_emw3080_device(void);
 

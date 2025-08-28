@@ -19,6 +19,7 @@ LOG_MODULE_REGISTER(emw3080_l2, CONFIG_LOG_DEFAULT_LEVEL);
 
 #include "emw3080_mgmt.h"
 #include "emw3080_socket.h"
+#include "emw3080_offload.h"
 
 /* Define a dummy MAC address for now */
 static uint8_t emw3080_mac_addr[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};

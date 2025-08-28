@@ -199,20 +199,14 @@ static int emw3080_init(const struct device *dev)
     /* Enable UART receive interrupt */
     uart_irq_rx_enable(data->uart);
     
-    /* Make sure UART IRQ is actually enabled at the hardware level */
-    if (!uart_irq_is_enabled(data->uart)) {
-        LOG_ERR("UART IRQ not enabled! Trying to enable again...");
-        uart_irq_rx_enable(data->uart);
-        
-        if (!uart_irq_is_enabled(data->uart)) {
-            LOG_ERR("Failed to enable UART IRQ after second attempt");
-            /* Continue anyway, but this is problematic */
-        } else {
-            LOG_INF("UART IRQ enabled after second attempt");
-        }
-    } else {
-        LOG_INF("UART IRQ verified as enabled");
-    }
+    /* The uart_irq_is_enabled function doesn't exist in Zephyr's API
+     * so we'll just trust that the interrupt is enabled after our call
+     */
+    LOG_INF("UART IRQ should be enabled now");
+    
+    /* Double-check by trying to enable it again (safe to call multiple times) */
+    uart_irq_rx_enable(data->uart);
+    LOG_INF("UART IRQ enabled again for good measure");
     
     /* Send AT command to test communication */
     char resp[64];
@@ -487,8 +481,8 @@ int emw3080_send_at_cmd(struct emw3080_data *data,
     return ret;
 }
 
-/* Function to parse IP address from response */
-static void emw3080_parse_ip_info(struct emw3080_data *data, char *resp)
+/* Function to parse IP address from response - used in multiple places */
+void emw3080_parse_ip_info(struct emw3080_data *data, char *resp)
 {
     /* Parse IP information from response - simplified implementation */
     char *ip_str = strstr(resp, "IP:");
