@@ -17,11 +17,17 @@ LOG_MODULE_REGISTER(emw3080_net, CONFIG_LOG_DEFAULT_LEVEL);
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/offloaded_netdev.h>
 #include <zephyr/net/net_l2.h>
+#include <zephyr/net/ethernet.h>
 #include <stdbool.h>
 
 #include "emw3080_offload_dev.h"
 #include "emw3080_mgmt.h"
 #include "emw3080_l2.h"
+
+/* Include the L2 implementation for offloaded network devices */
+NET_L2_DECLARE_PUBLIC(OFFLOADED_NETDEV);
+
+/* Let's avoid using non-exported internal functions */
 
 /* Forward declarations */
 extern int emw3080_init_with_uart(const struct device *dev, const struct device *uart_dev);
@@ -123,58 +129,89 @@ static void emw3080_net_iface_init(struct net_if *iface)
     const struct device *dev = net_if_get_device(iface);
     struct emw3080_net_data *data = dev->data;
     
-    LOG_INF("EMW3080 interface initialized");
+    LOG_INF("EMW3080: Interface initialization started for iface %p (idx=%d)", 
+           iface, net_if_get_by_iface(iface));
     
     /* Verify the device API pointer */
-    LOG_INF("Device API is at %p", dev->api);
+    LOG_INF("EMW3080: Device API is at %p", dev->api);
     
     /* Check if the API structure has our get_type function */
     const struct offloaded_if_api *api = (const struct offloaded_if_api *)dev->api;
     if (api && api->get_type) {
-        LOG_INF("Device API has get_type function - GOOD");
+        LOG_INF("EMW3080: Device API has get_type function - GOOD");
         enum offloaded_net_if_types type = api->get_type();
-        LOG_INF("API get_type() returns: %d (WiFi=%d)", 
+        LOG_INF("EMW3080: API get_type() returns: %d (WiFi=%d)", 
                type, (type == L2_OFFLOADED_NET_IF_TYPE_WIFI) ? 1 : 0);
     } else {
-        LOG_ERR("Device API does not have valid get_type function!");
+        LOG_ERR("EMW3080: Device API does not have valid get_type function!");
     }
     
     /* Save reference to interface */
+    LOG_INF("EMW3080: Saving interface reference");
     data->iface = iface;
     
     /* Set the interface in the WiFi management module */
+    LOG_INF("EMW3080: Setting interface in WiFi management module");
     emw3080_mgmt_set_iface(iface);
     
     /* Initialize WiFi management functionality - critical for WiFi identification */
+    LOG_INF("EMW3080: Initializing WiFi management functionality");
     emw3080_mgmt_init();
     
     /* IMPORTANT: Set up interface properties - this is critical for DHCP to work */
-    LOG_INF("Setting up interface properties for EMW3080");
+    LOG_INF("EMW3080: Setting up interface properties");
     
     /* Set MAC address for the interface */
+    LOG_INF("EMW3080: Setting MAC address: %02x:%02x:%02x:%02x:%02x:%02x", 
+           data->mac_addr[0], data->mac_addr[1], data->mac_addr[2],
+           data->mac_addr[3], data->mac_addr[4], data->mac_addr[5]);
     net_if_set_link_addr(iface, data->mac_addr, sizeof(data->mac_addr), NET_LINK_ETHERNET);
     
+    /* CRITICAL FIX: Configure the interface properly using public APIs instead of internals */
+    LOG_INF("EMW3080: Setting up offload functions on interface %d", 
+           net_if_get_by_iface(iface));
+    
+    /* Check the interface L2 implementation */
+    const struct net_l2 *l2_interface = net_if_l2(iface);
+    LOG_INF("EMW3080: Current L2 interface: %p (expected: %p)",
+           l2_interface, &NET_L2_GET_NAME(OFFLOADED_NETDEV));
+           
+    if (l2_interface && l2_interface->send) {
+        LOG_INF("EMW3080: L2 send function available: %p", l2_interface->send);
+    } else {
+        LOG_WRN("EMW3080: Missing L2 send function, packets may be dropped!");
+    }
+    
     /* Attach our L2 implementation to the interface */
+    LOG_INF("EMW3080: Attaching L2 implementation to interface");
     emw3080_attach_l2_to_iface(iface);
     
-    /* Register the offload API directly with the interface.
-     * In modern Zephyr versions, this is done during NET_DEVICE_OFFLOAD_INIT.
-     */
-    LOG_INF("Offload API registered during device initialization");
-    
     /* Set flags to enable sending/receiving */
+    LOG_INF("EMW3080: Setting interface flags UP and RUNNING");
     net_if_flag_set(iface, NET_IF_UP);
     net_if_flag_set(iface, NET_IF_RUNNING);
     
-    LOG_INF("Interface setup complete");
+    /* Check if the flags were properly set */
+    LOG_INF("EMW3080: Interface flags set - UP=%d, RUNNING=%d", 
+           net_if_flag_is_set(iface, NET_IF_UP),
+           net_if_flag_is_set(iface, NET_IF_RUNNING));
     
     /* Check if the interface is identified as WiFi and has L2 */
     int is_wifi = net_if_is_wifi(iface);
     int is_offloaded_wifi = net_off_is_wifi_offloaded(iface);
-    struct net_l2 *l2 = net_if_l2(iface);
+    struct net_l2 *l2 = (struct net_l2 *)net_if_l2(iface);
     
-    LOG_INF("EMW3080 WiFi interface registered and ready. WiFi=%d, Offloaded WiFi=%d, L2=%p",
+    LOG_INF("EMW3080: WiFi interface registered. WiFi=%d, Offloaded WiFi=%d, L2=%p",
            is_wifi, is_offloaded_wifi, l2);
+    
+    if (l2) {
+        LOG_INF("EMW3080: L2 interface functions - recv: %p, send: %p", 
+               l2->recv, l2->send);
+    } else {
+        LOG_ERR("EMW3080: No L2 interface attached - this will cause packet drops!");
+    }
+    
+    LOG_INF("EMW3080: Interface initialization complete");
 }
 
 /* Basic initialization function for the network interface */

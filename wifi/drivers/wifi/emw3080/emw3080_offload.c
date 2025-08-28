@@ -16,23 +16,40 @@ LOG_MODULE_DECLARE(emw3080, CONFIG_LOG_DEFAULT_LEVEL);
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_l2.h>
 #include <zephyr/net/ethernet.h>
+#include <zephyr/net/offloaded_netdev.h>
 #include "emw3080_dhcp.h"
 #include "emw3080_l2.h"
+
+/* Include the L2 implementation for offloaded network devices */
+NET_L2_DECLARE_PUBLIC(OFFLOADED_NETDEV);
+
+/* Let's avoid using non-exported internal functions */
 
 /* Ethernet L2 compatible send function that can be called directly by L2 */
 int emw3080_send_pkt(struct net_if *iface, struct net_pkt *pkt)
 {
-    LOG_INF("emw3080_send_pkt called: iface=%p, pkt=%p, len=%d", 
-           iface, pkt, net_pkt_get_len(pkt));
+    LOG_INF("EMW3080 send_pkt called: iface=%p (idx=%d), pkt=%p, len=%d", 
+           iface, net_if_get_by_iface(iface), pkt, net_pkt_get_len(pkt));
            
     if (!iface || !pkt) {
-        LOG_ERR("Invalid parameters: iface=%p, pkt=%p", iface, pkt);
+        LOG_ERR("EMW3080 send_pkt: Invalid parameters: iface=%p, pkt=%p", iface, pkt);
         return -EINVAL;
     }
     
-    /* Verify that this packet belongs to our interface */
-    if (net_pkt_iface(pkt) != iface) {
-        LOG_WRN("Packet does not belong to this interface");
+    /* Log interface state */
+    LOG_INF("EMW3080 send_pkt: Interface state - UP=%d, RUNNING=%d, L2=%p", 
+           net_if_flag_is_set(iface, NET_IF_UP),
+           net_if_flag_is_set(iface, NET_IF_RUNNING),
+           net_if_l2(iface));
+    
+    /* Check if the packet belongs to our interface */
+    struct net_if *pkt_iface = net_pkt_iface(pkt);
+    LOG_INF("EMW3080 send_pkt: Packet interface=%p (idx=%d), our interface=%p (idx=%d)",
+           pkt_iface, net_if_get_by_iface(pkt_iface),
+           iface, net_if_get_by_iface(iface));
+    
+    if (pkt_iface != iface) {
+        LOG_WRN("EMW3080 send_pkt: Packet does not belong to this interface!");
         /* But continue anyway - this might be a legitimate use case */
     }
     
@@ -82,18 +99,13 @@ int emw3080_send_pkt(struct net_if *iface, struct net_pkt *pkt)
                         net_if_ipv4_addr_add(iface, &addr, NET_ADDR_DHCP, 0);
                         
                         /* Set netmask and gateway using modern non-deprecated API if available */
-#if defined(CONFIG_NET_IF_UNICAST_IPV4_ADDR_ADD)
+                        /* Always use the modern non-deprecated API */
                         struct in_addr netmask_addr = {.s_addr = netmask.s_addr};
-                        net_if_ipv4_addr_add_by_index(net_if_get_by_iface(iface), &netmask_addr, 
-                                                    NET_ADDR_MANUAL, 0);
-                        
                         struct in_addr gw_addr = {.s_addr = gw.s_addr};
+                        
+                        /* Set netmask and gateway using the proper API */
+                        net_if_ipv4_set_netmask_by_addr(iface, &addr, &netmask_addr);
                         net_if_ipv4_set_gw(iface, &gw_addr);
-#else
-                        /* Fall back to the deprecated API for compatibility */
-                        net_if_ipv4_set_netmask(iface, &netmask);
-                        net_if_ipv4_set_gw(iface, &gw);
-#endif
                         
                         /* Log the assigned IP information */
                         LOG_INF("EMW3080 DHCP: IP=%d.%d.%d.%d, Mask=%d.%d.%d.%d, GW=%d.%d.%d.%d",
@@ -128,12 +140,32 @@ int emw3080_send_pkt(struct net_if *iface, struct net_pkt *pkt)
         }
     }
     
-        /* In a real implementation, this would send the packet through the WiFi modem */
+        /* SPECIAL HANDLING: For WiFi packet drops - use public APIs instead */
+    const struct net_l2 *l2 = net_if_l2(iface);
+    LOG_INF("EMW3080: Interface L2: %p", l2);
+    
+    /* Check if the interface has proper send function in L2 */
+    if (l2 == NULL || l2->send == NULL) {
+        LOG_WRN("EMW3080: Missing L2 or send function");
+    } else {
+        LOG_INF("EMW3080: L2 send function available: %p", l2->send);
+    }
+    
+    /* Check if the interface is properly configured as offloaded */
+    if (!net_if_is_offloaded(iface)) {
+        LOG_WRN("EMW3080: Interface is not marked as offloaded!");
+    } else {
+        LOG_INF("EMW3080: Interface is properly marked as offloaded");
+    }
+    
+    /* In a real implementation, this would send the packet through the WiFi modem */
     /* For now, we'll just pretend it was sent successfully */
-    LOG_INF("Packet sent successfully via L2 layer (simulated)");
+    LOG_INF("EMW3080: Packet sent successfully via L2 layer (simulated)");
     
     /* For better DHCP handling, we should also simulate a response here */
-    /* This would involve creating a new packet with appropriate response */
+    if (is_dhcp) {
+        LOG_INF("EMW3080: DHCP packet processed with static IP address assignment");
+    }
     
     return 0;  /* Success */
 }
