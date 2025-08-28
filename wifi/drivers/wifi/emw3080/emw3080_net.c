@@ -22,6 +22,10 @@ LOG_MODULE_REGISTER(emw3080_net, CONFIG_LOG_DEFAULT_LEVEL);
 #include "emw3080_offload_dev.h"
 #include "emw3080_mgmt.h"
 
+/* Include the L2 interface header */
+extern int emw3080_attach_l2_to_iface(struct net_if *iface);
+extern int emw3080_enable_direct_mode(struct net_if *iface);
+
 /* Forward declarations */
 extern int emw3080_init_with_uart(const struct device *dev, const struct device *uart_dev);
 extern const struct net_offload emw3080_offload;
@@ -150,12 +154,23 @@ static void emw3080_net_iface_init(struct net_if *iface)
     /* IMPORTANT: Set up interface properties - this is critical for DHCP to work */
     LOG_INF("Setting up interface properties for EMW3080");
     
+    /* CRITICAL: Attach the L2 interface first - this must happen before setting other properties */
+    int ret = emw3080_attach_l2_to_iface(iface);
+    if (ret != 0) {
+        LOG_ERR("Failed to attach L2 interface: %d", ret);
+    } else {
+        LOG_INF("L2 interface successfully attached");
+    }
+    
     /* Set MAC address for the interface */
     net_if_set_link_addr(iface, data->mac_addr, sizeof(data->mac_addr), NET_LINK_ETHERNET);
     
     /* Register the offload API directly with the interface */
     iface->if_dev->offload = &emw3080_offload;
     LOG_INF("Offload API registered with interface");
+    
+    /* Enable direct mode for packet transmission */
+    emw3080_enable_direct_mode(iface);
     
     /* Set flags to enable sending/receiving */
     net_if_flag_set(iface, NET_IF_UP);

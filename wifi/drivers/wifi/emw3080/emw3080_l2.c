@@ -68,8 +68,10 @@ int emw3080_attach_l2_to_iface(struct net_if *iface)
     /* Set MAC address for the interface */
     net_if_set_link_addr(iface, emw3080_mac_addr, sizeof(emw3080_mac_addr), NET_LINK_ETHERNET);
     
-    /* Set the L2 for this interface - THIS IS CRITICAL */
-    net_if_set_l2(iface, &NET_L2_GET_NAME(EMW3080_L2));
+    /* In newer Zephyr versions, we don't need to explicitly set L2 for offloaded interfaces.
+     * The L2 is registered via the NET_L2_INIT macro and will be automatically associated
+     * with the network interface.
+     */
     
     /* Mark interface as UP and RUNNING */
     net_if_flag_set(iface, NET_IF_UP);
