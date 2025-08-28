@@ -293,6 +293,33 @@ static int cmd_wifi_connect(const struct shell *sh, size_t argc, char *argv[])
         return -EIO;
     }
     
+    /* Check if already connected first */
+    struct wifi_iface_status initial_status = {0};
+    if (emw3080_mgmt_get_status(emw_dev, &initial_status) == 0) {
+        /* If already connected to the requested network, report success immediately */
+        if (initial_status.ssid_len > 0 && 
+            strncmp(initial_status.ssid, safe_ssid, initial_status.ssid_len) == 0) {
+            shell_fprintf(sh, SHELL_NORMAL, "Already connected to %s!\n", safe_ssid);
+            
+            /* Display connection details */
+            shell_fprintf(sh, SHELL_NORMAL, "\nConnection Details:\n");
+            shell_fprintf(sh, SHELL_NORMAL, "-------------------\n");
+            shell_fprintf(sh, SHELL_NORMAL, "State: Connected\n");
+            shell_fprintf(sh, SHELL_NORMAL, "RSSI: %d dBm\n", initial_status.rssi);
+            shell_fprintf(sh, SHELL_NORMAL, "Channel: %u\n", initial_status.channel);
+            shell_fprintf(sh, SHELL_NORMAL, "\nUse 'net ipv4' to check IP configuration\n");
+            return 0;
+        } else if (initial_status.ssid_len > 0) {
+            /* Already connected to a different network */
+            char current_ssid[33] = {0};
+            strncpy(current_ssid, initial_status.ssid, 
+                   initial_status.ssid_len > 32 ? 32 : initial_status.ssid_len);
+            
+            shell_fprintf(sh, SHELL_NORMAL, "Currently connected to %s. Reconnecting to %s...\n", 
+                         current_ssid, safe_ssid);
+        }
+    }
+    
     /* Poll for connection status */
     shell_fprintf(sh, SHELL_NORMAL, "Connection request sent. Waiting for connection (10 seconds max)...\n");
     
@@ -303,7 +330,9 @@ static int cmd_wifi_connect(const struct shell *sh, size_t argc, char *argv[])
     while (retries > 0) {
         /* Check connection status */
         if (emw3080_mgmt_get_status(emw_dev, &status) == 0) {
-            if (status.state == WIFI_STATE_COMPLETED) {
+            /* Check for any connected state (not just WIFI_STATE_COMPLETED) */
+            if ((status.state == WIFI_STATE_COMPLETED) || 
+                (status.ssid_len > 0 && strncmp(status.ssid, safe_ssid, status.ssid_len) == 0)) {
                 is_connected = true;
                 break;
             }
@@ -346,7 +375,28 @@ static int cmd_wifi_disconnect(const struct shell *sh, size_t argc, char *argv[]
         return -ENODEV;
     }
 
-    shell_fprintf(sh, SHELL_NORMAL, "Disconnecting from Wi-Fi network using direct EMW3080 API...\n");
+    /* Check current connection status first */
+    struct wifi_iface_status status = {0};
+    bool is_connected = false;
+    char current_ssid[33] = {0};
+    
+    if (emw3080_mgmt_get_status(emw_dev, &status) == 0) {
+        if (status.ssid_len > 0) {
+            is_connected = true;
+            /* Copy SSID to a safe buffer */
+            strncpy(current_ssid, status.ssid, 
+                   status.ssid_len > 32 ? 32 : status.ssid_len);
+            current_ssid[32] = '\0';
+        }
+    }
+    
+    if (!is_connected) {
+        shell_fprintf(sh, SHELL_NORMAL, "Not currently connected to any WiFi network\n");
+        return 0;
+    }
+
+    shell_fprintf(sh, SHELL_NORMAL, "Disconnecting from WiFi network '%s' using direct EMW3080 API...\n", 
+                 current_ssid);
     
     /* Call the EMW3080 management API directly */
     int err = emw3080_mgmt_disconnect(emw_dev);
@@ -366,7 +416,7 @@ static int cmd_wifi_disconnect(const struct shell *sh, size_t argc, char *argv[]
         /* Check connection status */
         struct wifi_iface_status status = {0};
         if (emw3080_mgmt_get_status(emw_dev, &status) == 0) {
-            if (status.state != WIFI_STATE_COMPLETED) {
+            if (status.ssid_len == 0) {  /* Check for empty SSID = not connected */
                 is_disconnected = true;
                 break;
             }
@@ -378,7 +428,7 @@ static int cmd_wifi_disconnect(const struct shell *sh, size_t argc, char *argv[]
     }
     
     if (is_disconnected) {
-        shell_fprintf(sh, SHELL_NORMAL, "Successfully disconnected from WiFi network\n");
+        shell_fprintf(sh, SHELL_NORMAL, "Successfully disconnected from WiFi network '%s'\n", current_ssid);
         return 0;
     } else {
         shell_fprintf(sh, SHELL_WARNING, "Disconnect request sent, but device still appears to be connected\n");
@@ -387,73 +437,106 @@ static int cmd_wifi_disconnect(const struct shell *sh, size_t argc, char *argv[]
     }
 }
 
-/* Wi-Fi status command - completely rewritten for maximum safety */
+/* Wi-Fi status command - ULTRA SAFE DIRECT IMPLEMENTATION */
 static int cmd_wifi_status(const struct shell *sh, size_t argc, char *argv[])
 {
-    /* ULTRA SAFE APPROACH - No assumptions, no complex structures */
-    shell_fprintf(sh, SHELL_NORMAL, "Looking for Wi-Fi interface...\n");
+    /* Get the EMW3080 device directly - safer than using network interface */
+    const struct device *emw_dev = get_emw3080_device();
+    if (!emw_dev) {
+        shell_fprintf(sh, SHELL_ERROR, "No EMW3080 device found\n");
+        return -ENODEV;
+    }
     
-    /* EMERGENCY FIX: DON'T ACCESS WIFI INTERFACE AT ALL */
-    /* Instead of using get_wifi_iface(), just print basic info */
     shell_fprintf(sh, SHELL_NORMAL, "Wi-Fi Interface Status Report\n");
     shell_fprintf(sh, SHELL_NORMAL, "==========================\n");
+    shell_fprintf(sh, SHELL_NORMAL, "Device: %s\n", emw_dev->name ? emw_dev->name : "<unnamed>");
     
-    /* Show basic network interfaces info without any potentially dangerous access */
-    shell_fprintf(sh, SHELL_NORMAL, "Network interfaces:\n");
-    
+    /* Get WiFi interface by device */
+    struct net_if *iface = NULL;
     int i;
-    bool found_emw = false;
-    struct net_if *emw_iface = NULL;
-    
-    /* Iterate over all interfaces but don't try to check their capabilities */
     for (i = 0; i < CONFIG_NET_IF_MAX_IPV4_COUNT; i++) {
         struct net_if *tmp = net_if_get_by_index(i);
         if (!tmp) {
             continue;
         }
         
-        const struct device *dev = net_if_get_device(tmp);
-        if (!dev) {
-            shell_fprintf(sh, SHELL_NORMAL, "Interface %d: <no device>\n", i);
-            continue;
-        }
-        
-        /* Only access device name if it exists */
-        const char *name = (dev && dev->name) ? dev->name : "<unnamed>";
-        shell_fprintf(sh, SHELL_NORMAL, "Interface %d: %s\n", i, name);
-        
-        /* Identify EMW3080 interfaces by name only */
-        if (dev && dev->name && strstr(dev->name, "EMW3080") != NULL) {
-            shell_fprintf(sh, SHELL_NORMAL, "  * EMW3080 interface detected\n");
-            shell_fprintf(sh, SHELL_NORMAL, "  * Status: %s\n", 
-                        net_if_is_up(tmp) ? "UP" : "DOWN");
-            found_emw = true;
-            emw_iface = tmp;
+        if (net_if_get_device(tmp) == emw_dev) {
+            iface = tmp;
+            break;
         }
     }
     
-    if (!found_emw) {
-        shell_fprintf(sh, SHELL_WARNING, "No EMW3080 interface found by name\n");
-        shell_fprintf(sh, SHELL_WARNING, "To diagnose connectivity issues, try:\n");
-        shell_fprintf(sh, SHELL_WARNING, "1. Check if the EMW3080 module is properly initialized\n");
-        shell_fprintf(sh, SHELL_WARNING, "2. Check network interface status with 'net iface'\n");
-        shell_fprintf(sh, SHELL_WARNING, "3. Check device list with 'device list'\n");
-        return 0;
+    if (!iface) {
+        shell_fprintf(sh, SHELL_WARNING, "EMW3080 device found but no associated network interface\n");
+        return -ENODEV;
     }
     
-    shell_fprintf(sh, SHELL_NORMAL, "\nEMW3080 connection status\n");
+    shell_fprintf(sh, SHELL_NORMAL, "Interface: #%d\n", net_if_get_by_iface(iface));
+    shell_fprintf(sh, SHELL_NORMAL, "Interface Status: %s\n", 
+                net_if_is_up(iface) ? "UP" : "DOWN");
+    
+    /* Now get the WiFi connection status using direct EMW3080 API */
+    shell_fprintf(sh, SHELL_NORMAL, "\nChecking WiFi connection status...\n");
+    
+    struct wifi_iface_status status = {0};
+    int err = emw3080_mgmt_get_status(emw_dev, &status);
+    
+    if (err) {
+        shell_fprintf(sh, SHELL_ERROR, "Failed to get WiFi status: %d\n", err);
+        shell_fprintf(sh, SHELL_NORMAL, "Try 'net iface' for basic interface information\n");
+        return -EIO;
+    }
+    
+    shell_fprintf(sh, SHELL_NORMAL, "\nWiFi Connection Details:\n");
     shell_fprintf(sh, SHELL_NORMAL, "=======================\n");
     
-    /* AVOID CHECKING IPv4 CONFIGURATION DIRECTLY */
-    /* Just mention how to check it safely */
-    shell_fprintf(sh, SHELL_NORMAL, "IP configuration: Use 'net ipv4' for details\n");
+    /* Display connection status */
+    if (status.ssid_len > 0) {
+        char safe_ssid[33] = {0};
+        strncpy(safe_ssid, status.ssid, 
+               status.ssid_len > 32 ? 32 : status.ssid_len);
+        safe_ssid[32] = '\0';
+        
+        shell_fprintf(sh, SHELL_NORMAL, "Status: Connected\n");
+        shell_fprintf(sh, SHELL_NORMAL, "Network: %s\n", safe_ssid);
+        shell_fprintf(sh, SHELL_NORMAL, "Channel: %u\n", status.channel);
+        shell_fprintf(sh, SHELL_NORMAL, "Signal Strength: %d dBm\n", status.rssi);
+        
+        /* Display security type if available */
+        const char *security;
+        switch (status.security) {
+            case WIFI_SECURITY_TYPE_NONE:
+                security = "Open";
+                break;
+            case WIFI_SECURITY_TYPE_PSK:
+                security = "WPA2-PSK";
+                break;
+            case WIFI_SECURITY_TYPE_PSK_SHA256:
+                security = "WPA2-PSK-SHA256";
+                break;
+            case WIFI_SECURITY_TYPE_SAE:
+                security = "WPA3-SAE";
+                break;
+            default:
+                security = "Unknown";
+        }
+        shell_fprintf(sh, SHELL_NORMAL, "Security: %s\n", security);
+        
+        /* Display MAC address if available and valid */
+        if (status.bssid[0] || status.bssid[1] || status.bssid[2] || 
+            status.bssid[3] || status.bssid[4] || status.bssid[5]) {
+            shell_fprintf(sh, SHELL_NORMAL, "AP MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+                        status.bssid[0], status.bssid[1], status.bssid[2],
+                        status.bssid[3], status.bssid[4], status.bssid[5]);
+        }
+    } else {
+        shell_fprintf(sh, SHELL_NORMAL, "Status: Not connected\n");
+    }
     
-    /* SAFETY: Skip WiFi management status API entirely for now */
-    /* Don't call net_mgmt for WIFI_IFACE_STATUS which might cause the bus fault */
-    shell_fprintf(sh, SHELL_NORMAL, "WiFi connection details: Not available in safe mode\n");
-    
-    shell_fprintf(sh, SHELL_NORMAL, "\nSafety mode is active to prevent hardware faults.\n");
-    shell_fprintf(sh, SHELL_NORMAL, "For network interface details, try 'net iface' instead.\n");
+    /* Display IP configuration information */
+    shell_fprintf(sh, SHELL_NORMAL, "\nIP Configuration:\n");
+    shell_fprintf(sh, SHELL_NORMAL, "---------------\n");
+    shell_fprintf(sh, SHELL_NORMAL, "Use 'net iface' or 'net ipv4' for detailed IP configuration\n");
     
     return 0;
 }
