@@ -9,6 +9,9 @@ menuconfig WIFI_DRIVERS
 
 if WIFI_DRIVERS
 
-source "$(dirname ${BASH_SOURCE[0]})/emw3080/Kconfig.emw3080"
+source "$(ZEPHYR_BASE)/drivers/wifi/Kconfig.drivers"
+
+# Include our custom EMW3080 driver
+rsource "emw3080/Kconfig"
 
 endif # WIFI_DRIVERS

@@ -1,0 +1,26 @@
+# EMW3080 Wi-Fi driver configuration options
+
+menuconfig EMW3080
+	bool "EMW3080 driver support"
+	default y
+	depends on WIFI && DT_HAS_MXCHIP_EMW3080_ENABLED
+	depends on UART_INTERRUPT_DRIVEN
+	depends on GPIO
+	help
+	  Enable MXCHIP EMW3080 WiFi driver.
+
+if EMW3080
+
+config EMW3080_RX_STACK_SIZE
+	int "Stack size for EMW3080 RX handler"
+	default 1024
+	help
+	  Stack size for the EMW3080 RX handler thread.
+
+config EMW3080_RX_PRIO
+	int "Priority for EMW3080 RX handler"
+	default 7
+	help
+	  Priority for the EMW3080 RX handler thread.
+
+endif # EMW3080

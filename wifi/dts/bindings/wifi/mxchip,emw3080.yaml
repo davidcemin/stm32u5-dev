@@ -4,6 +4,7 @@
 description: MXCHIP EMW3080 WiFi module driver (AT Commands)
 
 compatible: "mxchip,emw3080"
+# Note: This must match the DT_DRV_COMPAT in emw3080.c (with _ instead of ,)
 
 include: uart-device.yaml
 

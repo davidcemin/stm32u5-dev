@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define DT_DRV_COMPAT mxchip_emw3080
+#define DT_DRV_COMPAT mxchip_emw3080 
+/* Note: This must match the compatible string "mxchip,emw3080" in device tree 
+ * but with commas replaced by underscores */
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(emw3080, CONFIG_WIFI_LOG_LEVEL);
+LOG_MODULE_REGISTER(emw3080, CONFIG_LOG_DEFAULT_LEVEL);
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -84,28 +86,43 @@ static int emw3080_init(const struct device *dev)
     struct emw3080_data *data = dev->data;
     data->dev = dev;
 
-    LOG_INF("Initializing EMW3080 WiFi driver");
+    LOG_INF("Initializing EMW3080 WiFi driver [%s]", dev->name);
     
     /* Initialize GPIO pins if available */
     if (data->reset_gpio.port) {
+        LOG_INF("Reset GPIO found: port=%p, pin=%d", 
+               data->reset_gpio.port, data->reset_gpio.pin);
         if (!gpio_is_ready_dt(&data->reset_gpio)) {
             LOG_ERR("Reset GPIO device not ready");
             return -ENODEV;
         }
         gpio_pin_configure_dt(&data->reset_gpio, GPIO_OUTPUT_INACTIVE);
+        LOG_INF("Reset GPIO configured");
+    } else {
+        LOG_WRN("No reset GPIO specified in device tree");
     }
     
     if (data->power_gpio.port) {
+        LOG_INF("Power GPIO found: port=%p, pin=%d", 
+               data->power_gpio.port, data->power_gpio.pin);
         if (!gpio_is_ready_dt(&data->power_gpio)) {
             LOG_ERR("Power GPIO device not ready");
             return -ENODEV;
         }
         gpio_pin_configure_dt(&data->power_gpio, GPIO_OUTPUT_INACTIVE);
+        LOG_INF("Power GPIO configured");
     }
     
     /* Initialize UART */
-    if (!device_is_ready(data->uart)) {
-        LOG_ERR("UART device not ready");
+    if (data->uart) {
+        LOG_INF("UART device: %s", data->uart->name);
+        if (!device_is_ready(data->uart)) {
+            LOG_ERR("UART device not ready");
+            return -ENODEV;
+        }
+        LOG_INF("UART device ready");
+    } else {
+        LOG_ERR("No UART device found in data structure");
         return -ENODEV;
     }
     
@@ -116,12 +133,13 @@ static int emw3080_init(const struct device *dev)
         k_sleep(K_MSEC(100));
         gpio_pin_set_dt(&data->reset_gpio, 0);
         k_sleep(K_SECONDS(2)); /* Allow module to boot */
+        LOG_INF("Reset sequence completed");
     }
     
     /* Initialize work queue for async operations */
     k_work_init(&data->request_work, emw3080_request_handler);
     
-    LOG_INF("EMW3080 driver initialized");
+    LOG_INF("EMW3080 driver initialized successfully");
     return 0;
 }
 
@@ -181,5 +199,12 @@ static const struct wifi_mgmt_ops emw3080_mgmt_ops = {
                          POST_KERNEL,                                           \
                          CONFIG_WIFI_INIT_PRIORITY,                             \
                          &emw3080_api);
+
+/* Debug message to show driver is being compiled */
+#if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
+BUILD_ASSERT(1, "EMW3080 driver being compiled!");
+#else
+#warning "No compatible EMW3080 node found in device tree!"
+#endif
 
 DT_INST_FOREACH_STATUS_OKAY(EMW3080_INIT)

@@ -5,7 +5,7 @@
  */
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_DECLARE(emw3080, CONFIG_WIFI_LOG_LEVEL);
+LOG_MODULE_DECLARE(emw3080, CONFIG_LOG_DEFAULT_LEVEL);
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>

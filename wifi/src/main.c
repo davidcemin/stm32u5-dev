@@ -5,8 +5,9 @@
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/offloaded_netdev.h>
 #include <zephyr/logging/log.h>
+#include "../drivers/wifi/emw3080/emw3080_debug.h"
 
-LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
 /* Helper function to get payload length since it's missing in newer Zephyr */
 static inline size_t net_mgmt_event_get_payload_len(struct net_mgmt_event_callback *cb)
@@ -90,6 +91,13 @@ int main(void)
     struct net_if *iface;
     LOG_INF("EMW3080 WiFi sample starting...");
 
+    /* Debug: List all devices and interfaces for diagnostics */
+    k_sleep(K_SECONDS(1));  /* Give devices time to initialize */
+    LOG_INF("Running driver diagnostics");
+    emw3080_debug_list_devices();
+    emw3080_debug_list_interfaces();
+    emw3080_debug_check_initialization();
+    
     /* Register for Wi-Fi network events */
     net_mgmt_init_event_callback(&wifi_cb, wifi_mgmt_event_handler,
                                 NET_EVENT_WIFI_SCAN_RESULT |
@@ -108,6 +116,10 @@ int main(void)
     iface = get_wifi_iface();
     if (!iface) {
         LOG_ERR("No Wi-Fi interfaces available");
+        LOG_INF("This is likely due to the EMW3080 driver not being registered properly.");
+        LOG_INF("Check that:");
+        LOG_INF("1. The device tree overlay for UART4 is correct");
+        LOG_INF("2. The EMW3080 driver is properly registered in the system");
         return 0;
     }
     

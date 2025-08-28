@@ -14,4 +14,5 @@ target_sources(app PRIVATE
     src/wifi_shell.c
     drivers/wifi/emw3080/emw3080.c
     drivers/wifi/emw3080/emw3080_offload.c
+    drivers/wifi/emw3080/emw3080_debug.c
 )
