@@ -4,6 +4,8 @@
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/net_core.h>
 #include <zephyr/net/offloaded_netdev.h>
+#include <zephyr/net/dhcpv4.h>
+#include <zephyr/net/net_ip.h>
 #include <string.h>
 
 /* Include the EMW3080 management header directly to access its API */
@@ -570,12 +572,338 @@ static int cmd_wifi_power(const struct shell *sh, size_t argc, char *argv[])
     return 0;
 }
 
+/* DHCP configuration command */
+static int cmd_wifi_dhcp(const struct shell *sh, size_t argc, char *argv[])
+{
+    /* Get the EMW3080 interface directly - safer than using network interface API */
+    struct net_if *iface = NULL;
+    const struct device *emw_dev = get_emw3080_device();
+    
+    if (!emw_dev) {
+        shell_fprintf(sh, SHELL_ERROR, "No EMW3080 device found\n");
+        return -ENODEV;
+    }
+    
+    /* Find network interface for the EMW3080 device */
+    int i;
+    for (i = 0; i < CONFIG_NET_IF_MAX_IPV4_COUNT; i++) {
+        struct net_if *tmp = net_if_get_by_index(i);
+        if (!tmp) {
+            continue;
+        }
+        
+        if (net_if_get_device(tmp) == emw_dev) {
+            iface = tmp;
+            break;
+        }
+    }
+    
+    if (!iface) {
+        shell_fprintf(sh, SHELL_ERROR, "No network interface found for EMW3080\n");
+        return -ENODEV;
+    }
+    
+    if (argc < 2) {
+        shell_fprintf(sh, SHELL_ERROR, "Usage: wifi dhcp <start|stop>\n");
+        return -EINVAL;
+    }
+
+    if (strcmp(argv[1], "start") == 0) {
+        shell_fprintf(sh, SHELL_NORMAL, "Starting DHCP for WiFi interface...\n");
+        
+        /* Reset any existing IPv4 config first */
+        
+        /* Clear any existing IPv4 addresses */
+        struct in_addr *addr4 = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
+        if (addr4) {
+            /* Remove the address */
+            net_if_ipv4_addr_rm(iface, addr4);
+        }
+        
+        /* Start DHCP */
+        net_dhcpv4_start(iface);
+        
+        shell_fprintf(sh, SHELL_NORMAL, "DHCP client started. Use 'net ipv4' to check IP address\n");
+        shell_fprintf(sh, SHELL_NORMAL, "Waiting for IP address assignment (may take a few seconds)...\n");
+    } else if (strcmp(argv[1], "stop") == 0) {
+        shell_fprintf(sh, SHELL_NORMAL, "Stopping DHCP for WiFi interface...\n");
+        
+        /* Stop DHCP */
+        net_dhcpv4_stop(iface);
+        
+        shell_fprintf(sh, SHELL_NORMAL, "DHCP client stopped\n");
+    } else {
+        shell_fprintf(sh, SHELL_ERROR, "Invalid argument: %s\n", argv[1]);
+        shell_fprintf(sh, SHELL_ERROR, "Usage: wifi dhcp <start|stop>\n");
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+/* Add IP configuration command - direct IPv4 configuration */
+static int cmd_wifi_ip(const struct shell *sh, size_t argc, char *argv[])
+{
+    struct net_if *iface = NULL;
+    const struct device *emw_dev = get_emw3080_device();
+    
+    if (!emw_dev) {
+        shell_fprintf(sh, SHELL_ERROR, "No EMW3080 device found\n");
+        return -ENODEV;
+    }
+    
+    /* Find network interface for the EMW3080 device */
+    int i;
+    for (i = 0; i < CONFIG_NET_IF_MAX_IPV4_COUNT; i++) {
+        struct net_if *tmp = net_if_get_by_index(i);
+        if (!tmp) {
+            continue;
+        }
+        
+        if (net_if_get_device(tmp) == emw_dev) {
+            iface = tmp;
+            break;
+        }
+    }
+    
+    if (!iface) {
+        shell_fprintf(sh, SHELL_ERROR, "No network interface found for EMW3080\n");
+        return -ENODEV;
+    }
+    
+    if (argc < 2) {
+        shell_fprintf(sh, SHELL_ERROR, 
+                     "Usage: wifi ip set <ip_addr> <netmask> <gateway>\n");
+        shell_fprintf(sh, SHELL_ERROR, 
+                     "Example: wifi ip set 192.168.1.100 255.255.255.0 192.168.1.1\n");
+        return -EINVAL;
+    }
+
+    if (strcmp(argv[1], "set") == 0) {
+        if (argc < 5) {
+            shell_fprintf(sh, SHELL_ERROR, 
+                         "Usage: wifi ip set <ip_addr> <netmask> <gateway>\n");
+            return -EINVAL;
+        }
+        
+        /* Stop any running DHCP first */
+        net_dhcpv4_stop(iface);
+        
+        /* Parse IP address */
+        struct in_addr addr;
+        struct in_addr netmask;
+        struct in_addr gateway;
+        
+        if (net_addr_pton(AF_INET, argv[2], &addr) < 0) {
+            shell_fprintf(sh, SHELL_ERROR, "Invalid IP address: %s\n", argv[2]);
+            return -EINVAL;
+        }
+        
+        if (net_addr_pton(AF_INET, argv[3], &netmask) < 0) {
+            shell_fprintf(sh, SHELL_ERROR, "Invalid netmask: %s\n", argv[3]);
+            return -EINVAL;
+        }
+        
+        if (net_addr_pton(AF_INET, argv[4], &gateway) < 0) {
+            shell_fprintf(sh, SHELL_ERROR, "Invalid gateway: %s\n", argv[4]);
+            return -EINVAL;
+        }
+        
+        /* Remove any existing IPv4 addresses */
+        
+        /* Clear any existing IPv4 addresses */
+        struct in_addr *addr4 = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
+        if (addr4) {
+            /* Remove the address */
+            net_if_ipv4_addr_rm(iface, addr4);
+        }
+        
+        /* Set new IP address */
+        net_if_ipv4_addr_add(iface, &addr, NET_ADDR_MANUAL, 0);
+        
+        /* Set netmask */
+        net_if_ipv4_set_netmask_by_addr(iface, &addr, &netmask);
+        
+        /* Set gateway */
+        net_if_ipv4_set_gw(iface, &gateway);
+        
+        shell_fprintf(sh, SHELL_NORMAL, "Static IP configuration set:\n");
+        shell_fprintf(sh, SHELL_NORMAL, "IP Address: %s\n", argv[2]);
+        shell_fprintf(sh, SHELL_NORMAL, "Netmask: %s\n", argv[3]);
+        shell_fprintf(sh, SHELL_NORMAL, "Gateway: %s\n", argv[4]);
+        shell_fprintf(sh, SHELL_NORMAL, "Use 'net ipv4' to verify configuration\n");
+    } else {
+        shell_fprintf(sh, SHELL_ERROR, "Unknown subcommand: %s\n", argv[1]);
+        shell_fprintf(sh, SHELL_ERROR, 
+                     "Usage: wifi ip set <ip_addr> <netmask> <gateway>\n");
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+/* Network testing commands */
+static int cmd_wifi_ping(const struct shell *sh, size_t argc, char *argv[])
+{
+    if (argc < 2) {
+        shell_fprintf(sh, SHELL_ERROR, "Usage: wifi ping <hostname/ip>\n");
+        return -EINVAL;
+    }
+
+    shell_fprintf(sh, SHELL_NORMAL, "To ping %s, use the net ping command:\n", argv[1]);
+    shell_fprintf(sh, SHELL_NORMAL, "  net ping %s\n", argv[1]);
+    shell_fprintf(sh, SHELL_NORMAL, "This will test network connectivity using ICMP echo requests.\n");
+    
+    return 0;
+}
+
+/* Network troubleshooting command */
+static int cmd_wifi_diagnose(const struct shell *sh, size_t argc, char *argv[])
+{
+    shell_fprintf(sh, SHELL_NORMAL, "WiFi Network Diagnostic Report\n");
+    shell_fprintf(sh, SHELL_NORMAL, "===========================\n\n");
+    
+    /* 1. Check WiFi connection */
+    shell_fprintf(sh, SHELL_NORMAL, "Checking WiFi connection...\n");
+    const struct device *emw_dev = get_emw3080_device();
+    if (!emw_dev) {
+        shell_fprintf(sh, SHELL_ERROR, "No EMW3080 device found!\n");
+        shell_fprintf(sh, SHELL_NORMAL, "Recommendation: Check hardware initialization\n");
+        return -ENODEV;
+    }
+    
+    struct net_if *iface = NULL;
+    int i;
+    
+    /* Find network interface for the EMW3080 device */
+    for (i = 0; i < CONFIG_NET_IF_MAX_IPV4_COUNT; i++) {
+        struct net_if *tmp = net_if_get_by_index(i);
+        if (!tmp) {
+            continue;
+        }
+        
+        if (net_if_get_device(tmp) == emw_dev) {
+            iface = tmp;
+            break;
+        }
+    }
+    
+    if (!iface) {
+        shell_fprintf(sh, SHELL_ERROR, "No network interface found for EMW3080!\n");
+        shell_fprintf(sh, SHELL_NORMAL, "Recommendation: Check driver initialization\n");
+        return -ENODEV;
+    }
+    
+    shell_fprintf(sh, SHELL_NORMAL, "EMW3080 interface found: #%d\n", net_if_get_by_iface(iface));
+    shell_fprintf(sh, SHELL_NORMAL, "Interface status: %s\n", 
+                 net_if_is_up(iface) ? "UP" : "DOWN");
+    
+    if (!net_if_is_up(iface)) {
+        shell_fprintf(sh, SHELL_WARNING, "Interface is DOWN! Try 'wifi power on' to enable it.\n");
+    }
+    
+    /* 2. Check WiFi connection status */
+    shell_fprintf(sh, SHELL_NORMAL, "\nChecking WiFi connection status...\n");
+    struct wifi_iface_status status = {0};
+    int err = emw3080_mgmt_get_status(emw_dev, &status);
+    
+    if (err) {
+        shell_fprintf(sh, SHELL_ERROR, "Failed to get WiFi status: %d\n", err);
+    } else {
+        if (status.ssid_len > 0) {
+            char safe_ssid[33] = {0};
+            strncpy(safe_ssid, status.ssid, status.ssid_len > 32 ? 32 : status.ssid_len);
+            shell_fprintf(sh, SHELL_NORMAL, "Connected to WiFi network: %s\n", safe_ssid);
+            shell_fprintf(sh, SHELL_NORMAL, "Signal strength: %d dBm\n", status.rssi);
+            shell_fprintf(sh, SHELL_NORMAL, "Channel: %u\n", status.channel);
+        } else {
+            shell_fprintf(sh, SHELL_WARNING, "Not connected to any WiFi network!\n");
+            shell_fprintf(sh, SHELL_NORMAL, "Recommendation: Use 'wifi connect <SSID> <PSK>' to connect\n");
+        }
+    }
+    
+    /* 3. Check IP configuration */
+    shell_fprintf(sh, SHELL_NORMAL, "\nChecking IP configuration...\n");
+    bool has_ipv4 = false;
+    
+    /* Use the net_if IPv4 API available in this version */
+    struct in_addr *addr4 = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
+    if (addr4) {
+        char addr_str[NET_IPV4_ADDR_LEN];
+        net_addr_ntop(AF_INET, addr4, addr_str, sizeof(addr_str));
+        shell_fprintf(sh, SHELL_NORMAL, "IPv4 address: %s\n", addr_str);
+        has_ipv4 = true;
+    }
+    
+    /* Get gateway address */
+    struct in_addr gw = net_if_ipv4_get_gw(iface);
+    if (gw.s_addr) {
+        char gw_str[NET_IPV4_ADDR_LEN];
+        net_addr_ntop(AF_INET, &gw, gw_str, sizeof(gw_str));
+        shell_fprintf(sh, SHELL_NORMAL, "Gateway: %s\n", gw_str);
+    } else {
+        shell_fprintf(sh, SHELL_WARNING, "No gateway configured!\n");
+    }
+    
+    if (!has_ipv4) {
+        shell_fprintf(sh, SHELL_WARNING, "No IPv4 address configured!\n");
+        shell_fprintf(sh, SHELL_NORMAL, "Recommendations:\n");
+        shell_fprintf(sh, SHELL_NORMAL, "1. Try 'wifi dhcp start' to request an IP address\n");
+        shell_fprintf(sh, SHELL_NORMAL, "2. Or configure static IP with 'wifi ip set <ip> <mask> <gw>'\n");
+        shell_fprintf(sh, SHELL_NORMAL, "3. Check if your router's DHCP server is working\n");
+    }
+    
+    /* 4. Check DHCP status */
+    shell_fprintf(sh, SHELL_NORMAL, "\nChecking DHCP status...\n");
+    
+    /* In newer Zephyr versions, DHCP API has changed */
+    net_dhcpv4_start(iface);
+    
+    /* Now check if DHCP is enabled using a different method since the API has changed */
+    if (net_if_ipv4_get_global_addr(iface, NET_ADDR_DHCP) != NULL) {
+        /* DHCP was already running */
+        shell_fprintf(sh, SHELL_NORMAL, "DHCP client is active\n");
+        
+        /* Check if an IP address has been assigned */
+        if (has_ipv4) {
+            shell_fprintf(sh, SHELL_NORMAL, "DHCP state: IP address acquired\n");
+        } else {
+            shell_fprintf(sh, SHELL_NORMAL, "DHCP state: Attempting to get IP address\n");
+            shell_fprintf(sh, SHELL_NORMAL, "Recommendation: Wait a few seconds and check again\n");
+        }
+    } else {
+        /* DHCP wasn't running, so we just started it - stop it again */
+        net_dhcpv4_stop(iface);
+        shell_fprintf(sh, SHELL_NORMAL, "DHCP client is not active\n");
+    }
+    
+    /* Overall recommendations */
+    shell_fprintf(sh, SHELL_NORMAL, "\nSummary & Recommendations:\n");
+    shell_fprintf(sh, SHELL_NORMAL, "------------------------\n");
+    
+    if (!status.ssid_len) {
+        shell_fprintf(sh, SHELL_NORMAL, "* Connect to WiFi first: wifi connect <SSID> <PSK>\n");
+    } else if (!has_ipv4) {
+        shell_fprintf(sh, SHELL_NORMAL, "* Start DHCP client: wifi dhcp start\n");
+        shell_fprintf(sh, SHELL_NORMAL, "* Or configure static IP: wifi ip set <ip> <mask> <gw>\n");
+    } else {
+        shell_fprintf(sh, SHELL_NORMAL, "* Your network appears to be configured correctly\n");
+        shell_fprintf(sh, SHELL_NORMAL, "* Try 'net ping 8.8.8.8' to test Internet connectivity\n");
+    }
+    
+    return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(wifi_cmds,
     SHELL_CMD(scan, NULL, "Scan for Wi-Fi networks", cmd_wifi_scan),
-    SHELL_CMD(connect, NULL, "Connect: wifi connect <SSID> <PSK>", cmd_wifi_connect),
+    SHELL_CMD(connect, NULL, "Connect: wifi connect <SSID> <PSK> [security_type]", cmd_wifi_connect),
     SHELL_CMD(disconnect, NULL, "Disconnect from Wi-Fi network", cmd_wifi_disconnect),
     SHELL_CMD(status, NULL, "Show Wi-Fi interface status", cmd_wifi_status),
     SHELL_CMD(power, NULL, "Power on/off Wi-Fi: wifi power <on|off>", cmd_wifi_power),
+    SHELL_CMD(dhcp, NULL, "Start/stop DHCP: wifi dhcp <start|stop>", cmd_wifi_dhcp),
+    SHELL_CMD(ip, NULL, "Configure static IP: wifi ip set <ip> <netmask> <gw>", cmd_wifi_ip),
+    SHELL_CMD(ping, NULL, "Network test: wifi ping <ip/hostname>", cmd_wifi_ping),
+    SHELL_CMD(diagnose, NULL, "Run network diagnostics", cmd_wifi_diagnose),
     SHELL_SUBCMD_SET_END
 );
 
