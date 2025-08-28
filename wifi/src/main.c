@@ -73,17 +73,34 @@ static struct net_if *get_wifi_iface(void)
 {
     struct net_if *iface = NULL;
     int i = 0;
+    struct net_if *first_iface = NULL;
 
+    LOG_INF("Searching for network interfaces...");
+    
     while ((iface = net_if_get_by_index(i)) != NULL) {
+        /* Store the first interface as fallback */
+        if (first_iface == NULL) {
+            first_iface = iface;
+        }
+        
         /* Check if this interface has our driver */
         const struct device *dev = net_if_get_device(iface);
-        if (dev != NULL && strstr(dev->name, "EMW3080") != NULL) {
+        LOG_INF("Interface %d: device = %s", i, dev ? dev->name : "NULL");
+        
+        if (dev != NULL && dev->name != NULL && strstr(dev->name, "EMW3080") != NULL) {
+            LOG_INF("Found EMW3080 interface: %d", i);
             return iface;
         }
         i++;
     }
 
-    return NULL;
+    if (i == 0) {
+        LOG_ERR("No network interfaces found at all");
+        return NULL;
+    }
+
+    LOG_WRN("No EMW3080 interface found, falling back to first available interface");
+    return first_iface;
 }
 
 int main(void)
@@ -133,11 +150,19 @@ int main(void)
         /* Try to get the interface again after fallback init */
         iface = get_wifi_iface();
         if (!iface) {
-            LOG_ERR("Still no Wi-Fi interfaces after fallback initialization");
+            LOG_ERR("No network interfaces found in the system");
+            LOG_INF("This is likely due to a configuration issue with the network stack");
+            LOG_INF("Check that CONFIG_NETWORKING=y and other required options are set");
             return 0;
         }
         
-        LOG_INF("Wi-Fi interface created through fallback initialization");
+        const struct device *dev = net_if_get_device(iface);
+        if (dev && dev->name && strstr(dev->name, "EMW3080") != NULL) {
+            LOG_INF("Wi-Fi interface created through fallback initialization: %s", dev->name);
+        } else {
+            LOG_WRN("Using non-EMW3080 interface as fallback: %s", dev ? dev->name : "NULL");
+            LOG_WRN("WiFi functionality may not work as expected");
+        }
     } else {
         LOG_INF("Wi-Fi interface found through device tree binding");
     }

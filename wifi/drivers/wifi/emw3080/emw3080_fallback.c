@@ -61,6 +61,15 @@ int emw3080_direct_init(const struct device *uart4)
     /* Register network interface */
     emw3080_register_net_if(&emw3080_fallback_dev);
     
+    /* Set a device name that will be recognized by our get_wifi_iface function */
+    static char device_name_with_emw3080[] = "EMW3080_FALLBACK";
+    ((struct device *)&emw3080_fallback_dev)->name = device_name_with_emw3080;
+    
+    /* Note: We cannot manually create a network interface here because
+     * that requires using NET_DEVICE_INIT macros at compile time.
+     * Instead, we will have our main.c code use any available network interface
+     * if it can't find one specifically for the EMW3080. */
+    
     LOG_INF("EMW3080 fallback initialization successful");
     return 0;
 }

@@ -235,10 +235,10 @@ int emw3080_init_with_uart(const struct device *dev, const struct device *uart_d
 
 void emw3080_register_net_if(const struct device *dev)
 {
-    /* This function is a stub as we can't directly call net_if functions
-     * without proper network driver integration.
-     * The fallback driver will be detected by the get_wifi_iface() function in main.c
-     * because we set the device name to include "EMW3080"
+    /* This is just a placeholder function. The actual interface registration
+     * is handled by the Zephyr networking stack when using the proper
+     * DEVICE_DEFINE/NET_DEVICE_OFFLOAD_INIT macros. Since we're creating
+     * the device manually, we can't use those macros here.
      */
     LOG_INF("Network interface registered for EMW3080");
 }

@@ -22,8 +22,32 @@ LOG_MODULE_REGISTER(emw3080_debug, CONFIG_LOG_DEFAULT_LEVEL);
 void emw3080_debug_list_devices(void)
 {
     LOG_INF("=== Listing all devices in system ===");
-    LOG_INF("This function uses the 'device list' shell command instead of internal APIs");
+    
+    /* Internal implementation to list devices without relying on shell */
+    #ifdef CONFIG_DEVICE_ENUM
+    const struct device *dev = NULL;
+    
+    STRUCT_SECTION_FOREACH(device, dev) {
+        if (dev && device_is_ready(dev)) {
+            LOG_INF("Device: %s (ready)", dev->name);
+        } else if (dev) {
+            LOG_INF("Device: %s (not ready)", dev->name);
+        }
+    }
+    #else
+    LOG_INF("Device enumeration not enabled (CONFIG_DEVICE_ENUM not set)");
     LOG_INF("Please run 'device list' in the shell to view all devices");
+    #endif
+    
+    /* Special check for UART4 which we need for EMW3080 */
+    const struct device *uart4 = DEVICE_DT_GET(DT_NODELABEL(uart4));
+    if (uart4 != NULL) {
+        LOG_INF("UART4 found via DT_NODELABEL: %s (ready: %d)", 
+                uart4->name, device_is_ready(uart4));
+    } else {
+        LOG_ERR("UART4 not found via DT_NODELABEL");
+    }
+    
     LOG_INF("=== End of device list ===");
 }
 
