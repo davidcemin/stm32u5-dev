@@ -1,11 +1,22 @@
 #include <zephyr/kernel.h>
+#include <zephyr/device.h>
 #include <zephyr/net/net_if.h>
+#include <zephyr/net/net_core.h>
+#include <zephyr/net/net_context.h>
 #include <zephyr/net/net_mgmt.h>
 #include <zephyr/net/net_event.h>
 #include <zephyr/net/wifi_mgmt.h>
+#include <zephyr/net/ethernet.h>
 #include <zephyr/net/offloaded_netdev.h>
+#include <zephyr/net/socket.h>
+#include <string.h>
+#include <stdio.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/shell/shell.h>
 #include "../drivers/wifi/emw3080/emw3080_debug.h"
+
+/* Forward declaration for function to get network device */
+extern const struct device *get_emw3080_net_device(void);
 
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
@@ -72,35 +83,69 @@ static void dhcp_event_handler(struct net_mgmt_event_callback *cb,
 static struct net_if *get_wifi_iface(void)
 {
     struct net_if *iface = NULL;
-    int i = 0;
-    struct net_if *first_iface = NULL;
-
+    struct net_if *wifi_iface = NULL;
+    struct net_if *any_iface = NULL;
+    int count = 0;
+    
     LOG_INF("Searching for network interfaces...");
     
-    while ((iface = net_if_get_by_index(i)) != NULL) {
-        /* Store the first interface as fallback */
-        if (first_iface == NULL) {
-            first_iface = iface;
+    /* First pass - print all interfaces and identify EMW3080 */
+    for (int i = 0; i < CONFIG_NET_IF_MAX_IPV4_COUNT; i++) {
+        iface = net_if_get_by_index(i);
+        if (!iface) {
+            continue;
         }
         
-        /* Check if this interface has our driver */
+        count++;
         const struct device *dev = net_if_get_device(iface);
-        LOG_INF("Interface %d: device = %s", i, dev ? dev->name : "NULL");
         
-        if (dev != NULL && dev->name != NULL && strstr(dev->name, "EMW3080") != NULL) {
-            LOG_INF("Found EMW3080 interface: %d", i);
-            return iface;
+        /* Store the first interface as fallback */
+        if (!any_iface) {
+            any_iface = iface;
         }
-        i++;
+        
+        /* Try to determine if this is a WiFi interface based on capabilities */
+        bool is_wifi = false;
+        
+        /* Check the device name for "wifi" or our EMW3080 */
+        if (dev && dev->name) {
+            if (strstr(dev->name, "wifi") != NULL || 
+                strstr(dev->name, "WIFI") != NULL ||
+                strstr(dev->name, "WiFi") != NULL) {
+                is_wifi = true;
+                if (!wifi_iface) {
+                    wifi_iface = iface;
+                }
+            }
+        }
+        
+        /* Log the interface info */
+        LOG_INF("IF[%d]: %s, type=%s, mtu=%d", 
+                i, dev ? dev->name : "unknown",
+                is_wifi ? "WiFi" : "Other", 
+                net_if_get_mtu(iface));
+        
+        /* Specifically look for our EMW3080 device */
+        if (dev && dev->name && strstr(dev->name, "EMW3080") != NULL) {
+            LOG_INF("Found EMW3080 interface: %d", i);
+            return iface;  /* EMW3080 found - return immediately */
+        }
     }
 
-    if (i == 0) {
-        LOG_ERR("No network interfaces found at all");
+    /* No interfaces at all */
+    if (count == 0) {
+        LOG_ERR("No network interfaces found in the system");
         return NULL;
     }
-
-    LOG_WRN("No EMW3080 interface found, falling back to first available interface");
-    return first_iface;
+    
+    /* No EMW3080 found, but we have other WiFi interfaces we can use */
+    if (wifi_iface) {
+        LOG_WRN("No EMW3080 interface found, using generic WiFi interface");
+        return wifi_iface;
+    }
+    
+    LOG_WRN("No WiFi interface found, using first available interface");
+    return any_iface;
 }
 
 int main(void)
@@ -114,6 +159,22 @@ int main(void)
     emw3080_debug_list_devices();
     emw3080_debug_list_interfaces();
     emw3080_debug_check_initialization();
+    
+    /* Try fallback initialization first, before checking for interfaces */
+    LOG_INF("Trying fallback initialization...");
+    extern int emw3080_fallback_init(void);
+    emw3080_fallback_init();
+    
+    /* Check if our specialized network device is available */
+    const struct device *net_dev = get_emw3080_net_device();
+    if (net_dev && device_is_ready(net_dev)) {
+        LOG_INF("Found EMW3080 network device: %s", net_dev->name);
+    } else {
+        LOG_WRN("EMW3080 network device not ready or not found");
+    }
+    
+    /* Wait a bit for network interfaces to initialize */
+    k_sleep(K_MSEC(500));
     
     /* Register for Wi-Fi network events */
     net_mgmt_init_event_callback(&wifi_cb, wifi_mgmt_event_handler,
@@ -129,44 +190,39 @@ int main(void)
                                 NET_EVENT_IPV4_ADDR_ADD);
     net_mgmt_add_event_callback(&dhcp_cb);
 
-    /* Wait for network interface to be ready */
+    /* Check network interfaces again after fallback init */
     iface = get_wifi_iface();
     if (!iface) {
-        LOG_ERR("No Wi-Fi interfaces available from device tree binding");
-        LOG_INF("Trying fallback initialization...");
+        LOG_ERR("No network interfaces available");
+        LOG_ERR("This might be due to:");
+        LOG_ERR("1. Missing CONFIG_NET_NATIVE=y or CONFIG_NET_DRIVERS=y");
+        LOG_ERR("2. Network driver not being registered properly");
+        LOG_ERR("3. Insufficient interface slots (check CONFIG_NET_IF_MAX_IPV4_COUNT)");
         
-        /* Try fallback initialization */
-        extern int emw3080_fallback_init(void);
-        int ret = emw3080_fallback_init();
-        if (ret < 0) {
-            LOG_ERR("Fallback initialization failed: %d", ret);
-            LOG_INF("This is likely due to the EMW3080 driver not being registered properly.");
-            LOG_INF("Check that:");
-            LOG_INF("1. The device tree overlay for UART4 is correct");
-            LOG_INF("2. The EMW3080 driver is properly registered in the system");
-            return 0;
-        }
+        /* Print detailed config info to help debugging */
+        LOG_INF("Network config status:");
+        LOG_INF("- CONFIG_NETWORKING is %s", IS_ENABLED(CONFIG_NETWORKING) ? "enabled" : "disabled");
+        LOG_INF("- CONFIG_NET_NATIVE is %s", IS_ENABLED(CONFIG_NET_NATIVE) ? "enabled" : "disabled");
+        LOG_INF("- CONFIG_NET_OFFLOAD is %s", IS_ENABLED(CONFIG_NET_OFFLOAD) ? "enabled" : "disabled");
+        LOG_INF("- CONFIG_NET_SOCKETS_OFFLOAD is %s", IS_ENABLED(CONFIG_NET_SOCKETS_OFFLOAD) ? "enabled" : "disabled");
         
-        /* Try to get the interface again after fallback init */
-        iface = get_wifi_iface();
-        if (!iface) {
-            LOG_ERR("No network interfaces found in the system");
-            LOG_INF("This is likely due to a configuration issue with the network stack");
-            LOG_INF("Check that CONFIG_NETWORKING=y and other required options are set");
-            return 0;
-        }
-        
+        /* Create a dummy interface to allow shell commands to work */
+        LOG_INF("Shell commands will still work for device diagnostics");
+        LOG_INF("Try 'device list' to see all devices");
+        LOG_INF("Try 'net iface' to check network interfaces");
+    } else {
         const struct device *dev = net_if_get_device(iface);
+        LOG_INF("Found network interface: %s", dev ? dev->name : "unknown");
+        
         if (dev && dev->name && strstr(dev->name, "EMW3080") != NULL) {
-            LOG_INF("Wi-Fi interface created through fallback initialization: %s", dev->name);
+            LOG_INF("EMW3080 WiFi interface ready!");
         } else {
-            LOG_WRN("Using non-EMW3080 interface as fallback: %s", dev ? dev->name : "NULL");
+            LOG_WRN("Using non-EMW3080 interface: %s", dev ? dev->name : "unknown");
             LOG_WRN("WiFi functionality may not work as expected");
         }
-    } else {
-        LOG_INF("Wi-Fi interface found through device tree binding");
+        
+        LOG_INF("Use 'net' or 'wifi' shell commands to control the Wi-Fi interface");
     }
     
-    LOG_INF("Use 'net' or 'wifi' shell commands to control the Wi-Fi interface");
     return 0;
 }
