@@ -1,0 +1,35 @@
+#include <zephyr/dt-bindings/pinctrl/stm32-pinctrl.h>
+
+/* SPI2 pins to WLAN (from Table 14) */
+&pinctrl {
+    spi2_sck: spi2-sck {
+        pinmux = <STM32_PINMUX('D', 1, AF5)>;   /* PD1 SPI2_SCK */
+    };
+    spi2_miso: spi2-miso {
+        pinmux = <STM32_PINMUX('D', 3, AF5)>;   /* PD3 SPI2_MISO */
+    };
+    spi2_mosi: spi2-mosi {
+        pinmux = <STM32_PINMUX('D', 4, AF5)>;   /* PD4 SPI2_MOSI */
+    };
+    spi2_cs: spi2-cs {
+        pinmux = <STM32_PINMUX('B', 12, AF5)>;  /* PB12 SPI2_NSS */
+    };
+};
+
+&spi2 {
+    pinctrl-0 = <&spi2_sck &spi2_miso &spi2_mosi &spi2_cs>;
+    pinctrl-names = "default";
+    status = "okay";
+
+    eswifi0: ism43362@0 {
+        compatible = "inventek,eswifi";
+        reg = <0>;
+        spi-max-frequency = <20000000>;
+
+        wakeup-gpios = <&gpiof 15 GPIO_ACTIVE_HIGH>; /* PF15 Chip_En */
+        resetn-gpios = <&gpiod 14 GPIO_ACTIVE_LOW>;  /* PD14 Reset */
+        data-gpios   = <&gpiog 15 GPIO_ACTIVE_HIGH>; /* PG15 FLOW/DRDY */
+
+        status = "okay";
+    };
+};
