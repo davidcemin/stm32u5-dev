@@ -108,14 +108,22 @@ static int cmd_wifi_scan(const struct shell *sh, size_t argc, char *argv[])
     shell_fprintf(sh, SHELL_NORMAL, "\n====== WIFI NETWORKS ======\n");
     
     /* Get the results directly */
-    struct wifi_scan_result results[10];  /* Max 10 results */
+    int max_networks = 20;  /* Increased from 10 to capture more networks */
     int count = 0;
     
-    err = emw3080_mgmt_get_scan_results(results, 10, &count);
+    /* Allocate a larger buffer to make sure we capture all networks */
+    struct wifi_scan_result results[max_networks];
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Retrieving up to %d networks...\n", max_networks);
+    
+    /* Get results directly - we'll use the count returned by the function */
+    err = emw3080_mgmt_get_scan_results(results, max_networks, &count);
     if (err) {
         shell_fprintf(sh, SHELL_ERROR, "Failed to get scan results: %d\n", err);
         return -EIO;
     }
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Retrieved %d networks\n", count);
     
     if (count == 0) {
         shell_fprintf(sh, SHELL_NORMAL, "No networks found\n");
@@ -173,61 +181,210 @@ static int cmd_wifi_scan(const struct shell *sh, size_t argc, char *argv[])
     return 0;
 }
 
-/* Wi-Fi connect command */
+/* Wi-Fi connect command - ULTRA SAFE DIRECT IMPLEMENTATION */
 static int cmd_wifi_connect(const struct shell *sh, size_t argc, char *argv[])
 {
-    struct net_if *iface = get_wifi_iface();
-    
-    if (!iface) {
-        shell_fprintf(sh, SHELL_ERROR, "No Wi-Fi interface found\n");
-        return -ENODEV;
-    }
-    
     if (argc < 3) {
         shell_fprintf(sh, SHELL_ERROR,
-                      "Usage: wifi connect <SSID> <PSK>\n");
+                      "Usage: wifi connect <SSID> <PSK> [security_type]\n");
+        shell_fprintf(sh, SHELL_NORMAL,
+                      "Security types: 0=Open, 1=WPA2-PSK, 2=WPA2-PSK-SHA256, 3=WPA3-SAE\n");
         return -EINVAL;
     }
 
+    /* Get the EMW3080 device directly - safer than using network interface */
+    const struct device *emw_dev = get_emw3080_device();
+    if (!emw_dev) {
+        shell_fprintf(sh, SHELL_ERROR, "No EMW3080 device found\n");
+        return -ENODEV;
+    }
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Found EMW3080 device: %s\n", 
+                 emw_dev->name ? emw_dev->name : "unnamed");
+    
+    /* Create a safe local copy of the SSID and PSK with proper bounds checking */
+    char safe_ssid[33] = {0};
+    char safe_psk[65] = {0};
+    
+    size_t ssid_len = strlen(argv[1]);
+    size_t psk_len = strlen(argv[2]);
+    
+    /* Validate SSID length */
+    if (ssid_len == 0 || ssid_len > 32) {
+        shell_fprintf(sh, SHELL_ERROR, "Invalid SSID length: %zu (must be 1-32 characters)\n", ssid_len);
+        return -EINVAL;
+    }
+    
+    /* Validate PSK length - empty is allowed for open networks */
+    if (psk_len > 64) {
+        shell_fprintf(sh, SHELL_ERROR, "Invalid PSK length: %zu (must be 0-64 characters)\n", psk_len);
+        return -EINVAL;
+    }
+    
+    /* Copy the SSID and PSK to safe buffers */
+    strncpy(safe_ssid, argv[1], 32);
+    safe_ssid[32] = '\0';  /* Ensure null termination */
+    
+    strncpy(safe_psk, argv[2], 64);
+    safe_psk[64] = '\0';  /* Ensure null termination */
+    
+    /* Determine security type */
+    enum wifi_security_type security = WIFI_SECURITY_TYPE_PSK;  /* Default to WPA2-PSK */
+    
+    if (argc >= 4) {
+        /* User specified security type */
+        int sec_type = 1; /* Default to PSK */
+        
+        /* Convert string to integer safely */
+        if (argv[3][0] >= '0' && argv[3][0] <= '9') {
+            sec_type = argv[3][0] - '0';
+        }
+        
+        switch (sec_type) {
+            case WIFI_SECURITY_TYPE_NONE:
+                security = WIFI_SECURITY_TYPE_NONE;
+                break;
+            case WIFI_SECURITY_TYPE_PSK:
+                security = WIFI_SECURITY_TYPE_PSK;
+                break;
+            case WIFI_SECURITY_TYPE_PSK_SHA256:
+                security = WIFI_SECURITY_TYPE_PSK_SHA256;
+                break;
+            case WIFI_SECURITY_TYPE_SAE:
+                security = WIFI_SECURITY_TYPE_SAE;
+                break;
+            default:
+                shell_fprintf(sh, SHELL_WARNING, "Unrecognized security type %d, defaulting to WPA2-PSK\n", 
+                             sec_type);
+                security = WIFI_SECURITY_TYPE_PSK;
+        }
+    } else if (psk_len == 0) {
+        /* Infer security type from PSK length */
+        security = WIFI_SECURITY_TYPE_NONE;
+        shell_fprintf(sh, SHELL_NORMAL, "No PSK provided, assuming open network\n");
+    }
+    
+    /* Prepare the connection parameters */
     struct wifi_connect_req_params params = { 0 };
     
-    params.ssid = argv[1];
-    params.ssid_length = strlen(argv[1]);
+    params.ssid = safe_ssid;
+    params.ssid_length = ssid_len;
     
-    params.psk = argv[2];
-    params.psk_length = strlen(argv[2]);
+    params.psk = safe_psk;
+    params.psk_length = psk_len;
     
     params.channel = WIFI_CHANNEL_ANY;
-    params.security = WIFI_SECURITY_TYPE_PSK;
+    params.security = security;
     
-    shell_fprintf(sh, SHELL_NORMAL, "Connecting to SSID: %s...\n", argv[1]);
+    /* Display connection attempt details */
+    shell_fprintf(sh, SHELL_NORMAL, "Connecting to SSID: %s\n", safe_ssid);
+    shell_fprintf(sh, SHELL_NORMAL, "Security type: %s\n", 
+                security == WIFI_SECURITY_TYPE_NONE ? "Open" :
+                security == WIFI_SECURITY_TYPE_PSK ? "WPA2-PSK" :
+                security == WIFI_SECURITY_TYPE_PSK_SHA256 ? "WPA2-PSK-SHA256" :
+                security == WIFI_SECURITY_TYPE_SAE ? "WPA3-SAE" : "Unknown");
     
-    if (net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &params, sizeof(params))) {
-        shell_fprintf(sh, SHELL_ERROR, "Connection request failed\n");
+    /* Call the EMW3080 management API directly */
+    shell_fprintf(sh, SHELL_NORMAL, "Initiating connection using direct EMW3080 API...\n");
+    int err = emw3080_mgmt_connect(emw_dev, &params);
+    
+    if (err) {
+        shell_fprintf(sh, SHELL_ERROR, "Connection failed with error: %d\n", err);
         return -EIO;
     }
-
-    return 0;
+    
+    /* Poll for connection status */
+    shell_fprintf(sh, SHELL_NORMAL, "Connection request sent. Waiting for connection (10 seconds max)...\n");
+    
+    int retries = 100;  /* 100 * 100ms = 10 second max wait time */
+    bool is_connected = false;
+    struct wifi_iface_status status = {0};
+    
+    while (retries > 0) {
+        /* Check connection status */
+        if (emw3080_mgmt_get_status(emw_dev, &status) == 0) {
+            if (status.state == WIFI_STATE_COMPLETED) {
+                is_connected = true;
+                break;
+            }
+        }
+        
+        /* Wait a bit */
+        k_sleep(K_MSEC(100));
+        retries--;
+        
+        if (retries % 10 == 0) {
+            /* Print status every second */
+            shell_fprintf(sh, SHELL_NORMAL, "Still connecting... (%d seconds remaining)\n", retries / 10);
+        }
+    }
+    
+    if (is_connected) {
+        shell_fprintf(sh, SHELL_NORMAL, "Successfully connected to %s!\n", safe_ssid);
+        
+        /* Display connection details */
+        shell_fprintf(sh, SHELL_NORMAL, "\nConnection Details:\n");
+        shell_fprintf(sh, SHELL_NORMAL, "-------------------\n");
+        shell_fprintf(sh, SHELL_NORMAL, "State: Connected\n");
+        shell_fprintf(sh, SHELL_NORMAL, "RSSI: %d dBm\n", status.rssi);
+        shell_fprintf(sh, SHELL_NORMAL, "Channel: %u\n", status.channel);
+        shell_fprintf(sh, SHELL_NORMAL, "\nUse 'net ipv4' to check IP configuration\n");
+        return 0;
+    }
+    
+    shell_fprintf(sh, SHELL_ERROR, "Connection timed out after 10 seconds\n");
+    return -ETIMEDOUT;
 }
 
-/* Wi-Fi disconnect command */
+/* Wi-Fi disconnect command - ULTRA SAFE DIRECT IMPLEMENTATION */
 static int cmd_wifi_disconnect(const struct shell *sh, size_t argc, char *argv[])
 {
-    struct net_if *iface = get_wifi_iface();
-    
-    if (!iface) {
-        shell_fprintf(sh, SHELL_ERROR, "No Wi-Fi interface found\n");
+    /* Get the EMW3080 device directly - safer than using network interface */
+    const struct device *emw_dev = get_emw3080_device();
+    if (!emw_dev) {
+        shell_fprintf(sh, SHELL_ERROR, "No EMW3080 device found\n");
         return -ENODEV;
     }
 
-    shell_fprintf(sh, SHELL_NORMAL, "Disconnecting from Wi-Fi network...\n");
+    shell_fprintf(sh, SHELL_NORMAL, "Disconnecting from Wi-Fi network using direct EMW3080 API...\n");
     
-    if (net_mgmt(NET_REQUEST_WIFI_DISCONNECT, iface, NULL, 0)) {
-        shell_fprintf(sh, SHELL_ERROR, "Disconnect request failed\n");
+    /* Call the EMW3080 management API directly */
+    int err = emw3080_mgmt_disconnect(emw_dev);
+    
+    if (err) {
+        shell_fprintf(sh, SHELL_ERROR, "Disconnect failed with error: %d\n", err);
         return -EIO;
     }
-
-    return 0;
+    
+    /* Poll for disconnection status */
+    shell_fprintf(sh, SHELL_NORMAL, "Disconnect request sent. Waiting for confirmation (3 seconds max)...\n");
+    
+    int retries = 30;  /* 30 * 100ms = 3 second max wait time */
+    bool is_disconnected = false;
+    
+    while (retries > 0) {
+        /* Check connection status */
+        struct wifi_iface_status status = {0};
+        if (emw3080_mgmt_get_status(emw_dev, &status) == 0) {
+            if (status.state != WIFI_STATE_COMPLETED) {
+                is_disconnected = true;
+                break;
+            }
+        }
+        
+        /* Wait a bit */
+        k_sleep(K_MSEC(100));
+        retries--;
+    }
+    
+    if (is_disconnected) {
+        shell_fprintf(sh, SHELL_NORMAL, "Successfully disconnected from WiFi network\n");
+        return 0;
+    } else {
+        shell_fprintf(sh, SHELL_WARNING, "Disconnect request sent, but device still appears to be connected\n");
+        shell_fprintf(sh, SHELL_WARNING, "You may need to check device status manually\n");
+        return -EIO;
+    }
 }
 
 /* Wi-Fi status command - completely rewritten for maximum safety */
