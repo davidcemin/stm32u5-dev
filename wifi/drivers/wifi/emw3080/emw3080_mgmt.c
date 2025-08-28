@@ -268,27 +268,45 @@ int emw3080_mgmt_get_status(const struct device *dev, struct wifi_iface_status *
     LOG_INF("EMW3080 mock WiFi get status");
     
     /* Safety check to prevent null pointer dereference */
-    if (!dev || !status) {
-        LOG_ERR("Invalid parameters to emw3080_mgmt_get_status: dev=%p, status=%p", dev, status);
+    if (!dev) {
+        LOG_ERR("Invalid device parameter to emw3080_mgmt_get_status: dev=%p", dev);
         return -EINVAL;
     }
     
-    /* Copy the current status to the output parameter */
-    memcpy(status, &current_status, sizeof(struct wifi_iface_status));
+    if (!status) {
+        LOG_ERR("Invalid status parameter to emw3080_mgmt_get_status: status=%p", status);
+        return -EINVAL;
+    }
     
-    /* Set a real device name */
-    strncpy(status->ssid, "EMW3080-TEST", sizeof(status->ssid) - 1);
-    status->ssid[sizeof(status->ssid) - 1] = '\0';
-    status->ssid_len = strlen(status->ssid);
+    /* Start with a completely zeroed structure to be safe */
+    memset(status, 0, sizeof(struct wifi_iface_status));
     
-    /* Ensure valid values for all fields */
+    /* Set all fields individually rather than copying a structure */
+    status->state = WIFI_STATE_ASSOCIATED; /* Pretend we're connected */
+    
+    /* Set a safe SSID */
+    const char *test_ssid = "EMW3080-TEST";
+    size_t len = strlen(test_ssid);
+    if (len >= sizeof(status->ssid)) {
+        len = sizeof(status->ssid) - 1; /* Ensure space for null terminator */
+    }
+    
+    memcpy(status->ssid, test_ssid, len);
+    status->ssid[len] = '\0';
+    status->ssid_len = len;
+    
+    /* Set other fields to safe default values */
     status->band = WIFI_FREQ_BAND_2_4_GHZ;
     status->channel = 1;
     status->security = WIFI_SECURITY_TYPE_PSK;
     status->rssi = -65;
-    status->state = WIFI_STATE_ASSOCIATED;
+    status->iface_mode = WIFI_STA_MODE;
+    status->mfp = WIFI_MFP_DISABLE;
     
-    LOG_INF("WiFi status returned: SSID=%s, State=%d", status->ssid, status->state);
+    /* Log what we're returning for debugging */
+    LOG_INF("WiFi status returning: SSID=%s (%d), State=%d, RSSI=%d",
+            status->ssid, status->ssid_len, status->state, status->rssi);
+            
     return 0;
 }
 
