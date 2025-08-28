@@ -115,14 +115,33 @@ int main(void)
     /* Wait for network interface to be ready */
     iface = get_wifi_iface();
     if (!iface) {
-        LOG_ERR("No Wi-Fi interfaces available");
-        LOG_INF("This is likely due to the EMW3080 driver not being registered properly.");
-        LOG_INF("Check that:");
-        LOG_INF("1. The device tree overlay for UART4 is correct");
-        LOG_INF("2. The EMW3080 driver is properly registered in the system");
-        return 0;
+        LOG_ERR("No Wi-Fi interfaces available from device tree binding");
+        LOG_INF("Trying fallback initialization...");
+        
+        /* Try fallback initialization */
+        extern int emw3080_fallback_init(void);
+        int ret = emw3080_fallback_init();
+        if (ret < 0) {
+            LOG_ERR("Fallback initialization failed: %d", ret);
+            LOG_INF("This is likely due to the EMW3080 driver not being registered properly.");
+            LOG_INF("Check that:");
+            LOG_INF("1. The device tree overlay for UART4 is correct");
+            LOG_INF("2. The EMW3080 driver is properly registered in the system");
+            return 0;
+        }
+        
+        /* Try to get the interface again after fallback init */
+        iface = get_wifi_iface();
+        if (!iface) {
+            LOG_ERR("Still no Wi-Fi interfaces after fallback initialization");
+            return 0;
+        }
+        
+        LOG_INF("Wi-Fi interface created through fallback initialization");
+    } else {
+        LOG_INF("Wi-Fi interface found through device tree binding");
     }
     
-    LOG_INF("Wi-Fi interface found. Use 'net' or 'wifi' shell commands to control.");
+    LOG_INF("Use 'net' or 'wifi' shell commands to control the Wi-Fi interface");
     return 0;
 }

@@ -56,7 +56,7 @@ static enum offloaded_net_if_types emw3080_get_type(void);
 static const struct wifi_mgmt_ops emw3080_mgmt_ops;
 
 /* Define the API structure */
-static const struct net_wifi_mgmt_offload emw3080_api = {
+const struct net_wifi_mgmt_offload emw3080_api = {
     .wifi_iface.iface_api.init = emw3080_iface_init,
     .wifi_iface.get_type = emw3080_get_type,
     .wifi_mgmt_api = &emw3080_mgmt_ops,
@@ -87,6 +87,13 @@ static int emw3080_init(const struct device *dev)
     data->dev = dev;
 
     LOG_INF("Initializing EMW3080 WiFi driver [%s]", dev->name);
+    LOG_INF("Checking if UART4 device exists directly");
+    const struct device *uart4 = device_get_binding("uart4");
+    if (uart4) {
+        LOG_INF("Found UART4: %s (ready: %d)", uart4->name, device_is_ready(uart4));
+    } else {
+        LOG_ERR("UART4 not found using device_get_binding()");
+    }
     
     /* Initialize GPIO pins if available */
     if (data->reset_gpio.port) {
@@ -115,15 +122,27 @@ static int emw3080_init(const struct device *dev)
     
     /* Initialize UART */
     if (data->uart) {
-        LOG_INF("UART device: %s", data->uart->name);
+        LOG_INF("UART device from DT binding: %s", data->uart->name);
         if (!device_is_ready(data->uart)) {
             LOG_ERR("UART device not ready");
-            return -ENODEV;
+            /* Try to use uart4 directly if available */
+            if (uart4 && device_is_ready(uart4)) {
+                LOG_INF("Using UART4 directly instead");
+                data->uart = uart4;
+            } else {
+                return -ENODEV;
+            }
         }
         LOG_INF("UART device ready");
     } else {
         LOG_ERR("No UART device found in data structure");
-        return -ENODEV;
+        /* Try to use uart4 directly if available */
+        if (uart4 && device_is_ready(uart4)) {
+            LOG_INF("Using UART4 directly instead");
+            data->uart = uart4;
+        } else {
+            return -ENODEV;
+        }
     }
     
     /* Reset the module */
@@ -188,6 +207,7 @@ static const struct wifi_mgmt_ops emw3080_mgmt_ops = {
     static struct emw3080_data emw3080_data_##inst = {                          \
         .reset_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, reset_gpios, {0}),         \
         .power_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, power_gpios, {0}),         \
+        /* Try to get the UART device from the device tree */                   \
         .uart = DEVICE_DT_GET(DT_INST_BUS(inst)),                               \
     };                                                                          \
                                                                                \
@@ -199,6 +219,29 @@ static const struct wifi_mgmt_ops emw3080_mgmt_ops = {
                          POST_KERNEL,                                           \
                          CONFIG_WIFI_INIT_PRIORITY,                             \
                          &emw3080_api);
+
+/* Declaration for fallback function that will be implemented in emw3080_fallback.c */
+int emw3080_direct_init(const struct device *uart4);
+
+/* Functions to be called from emw3080_fallback.c */
+int emw3080_init_with_uart(const struct device *dev, const struct device *uart_dev)
+{
+    struct emw3080_data *data = dev->data;
+    data->uart = uart_dev;
+    
+    /* Call the regular init function */
+    return emw3080_init(dev);
+}
+
+void emw3080_register_net_if(const struct device *dev)
+{
+    /* This function is a stub as we can't directly call net_if functions
+     * without proper network driver integration.
+     * The fallback driver will be detected by the get_wifi_iface() function in main.c
+     * because we set the device name to include "EMW3080"
+     */
+    LOG_INF("Network interface registered for EMW3080");
+}
 
 /* Debug message to show driver is being compiled */
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)

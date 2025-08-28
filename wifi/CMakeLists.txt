@@ -2,6 +2,7 @@
 
 cmake_minimum_required(VERSION 3.20.0)
 
+# Simple configuration that doesn't try to add a custom driver
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(emw3080_wifi_sample)
 
@@ -15,4 +16,5 @@ target_sources(app PRIVATE
     drivers/wifi/emw3080/emw3080.c
     drivers/wifi/emw3080/emw3080_offload.c
     drivers/wifi/emw3080/emw3080_debug.c
+    drivers/wifi/emw3080/emw3080_fallback.c
 )

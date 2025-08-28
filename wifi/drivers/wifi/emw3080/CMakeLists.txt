@@ -11,4 +11,5 @@ zephyr_library_sources(
     emw3080_offload.c
     emw3080_debug.c
     emw3080_shell.c
+    emw3080_fallback.c
 )

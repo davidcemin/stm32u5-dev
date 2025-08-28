@@ -1,0 +1,4 @@
+# Main Kconfig file for the application
+
+# Include Zephyr's Kconfig
+source "Kconfig.zephyr"
