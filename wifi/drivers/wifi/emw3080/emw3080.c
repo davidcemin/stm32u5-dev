@@ -171,11 +171,16 @@ static int emw3080_init(const struct device *dev)
     /* Reset the module */
     LOG_INF("Resetting EMW3080 module");
     if (data->reset_gpio.port) {
-        gpio_pin_set_dt(&data->reset_gpio, 1);
-        k_sleep(K_MSEC(100));
-        gpio_pin_set_dt(&data->reset_gpio, 0);
-        k_sleep(K_SECONDS(2)); /* Allow module to boot */
+        /* First make sure module is in a known state */
+        gpio_pin_set_dt(&data->reset_gpio, 1);  /* Assert reset (high) */
+        k_sleep(K_MSEC(200));                  /* Hold in reset */
+        gpio_pin_set_dt(&data->reset_gpio, 0);  /* Release reset (low) */
+        
+        /* Give module time to boot - longer delay */
+        k_sleep(K_SECONDS(3));                 /* Allow module to boot */
         LOG_INF("Reset sequence completed");
+    } else {
+        LOG_WRN("No reset GPIO, cannot reset module!");
     }
     
     /* Initialize work queue for async operations */
@@ -416,30 +421,34 @@ int emw3080_send_at_cmd(struct emw3080_data *data,
     }
     
     LOG_INF("Sending AT command (len=%d, timeout=%dms): %.*s", 
-           cmd_len, timeout_ms, cmd_len, cmd);
+           cmd_len, timeout_ms, (int)cmd_len, cmd);
     
     /* Lock UART access */
     k_mutex_lock(&data->uart_mutex, K_FOREVER);
     
-    /* Reset buffer */
+    /* Reset buffer and flush UART */
     data->rx_buf.len = 0;
     data->rx_buf.data_ready = false;
+    emw3080_uart_flush_rx(data->uart);
     
     /* Make sure UART IRQ is enabled */
     uart_irq_rx_enable(data->uart);
     
-    /* Send command */
+    /* Send command using our improved UART send function */
     LOG_DBG("Writing command to UART...");
-    for (size_t i = 0; i < cmd_len; i++) {
-        uart_poll_out(data->uart, cmd[i]);
-        /* Small delay to ensure reliable transmission */
-        k_busy_wait(100);
+    ret = emw3080_uart_send_data(data->uart, (const uint8_t *)cmd, cmd_len, 500);
+    if (ret < 0) {
+        LOG_ERR("Failed to send AT command: %d", ret);
+        k_mutex_unlock(&data->uart_mutex);
+        return ret;
     }
     
-    LOG_DBG("Waiting for response with timeout %d ms", timeout_ms);
+    /* Extend the timeout for improved reliability */
+    uint32_t effective_timeout = timeout_ms + 1000; /* Add 1 second buffer */
+    LOG_DBG("Waiting for response with timeout %d ms", effective_timeout);
     
     /* Wait for response with timeout */
-    ret = k_sem_take(&data->rx_buf.sem, K_MSEC(timeout_ms));
+    ret = k_sem_take(&data->rx_buf.sem, K_MSEC(effective_timeout));
     
     if (ret == 0 && data->rx_buf.data_ready) {
         LOG_DBG("Received response (len=%d)", data->rx_buf.len);
@@ -452,26 +461,40 @@ int emw3080_send_at_cmd(struct emw3080_data *data,
             LOG_DBG("Response: %s", resp_buf);
         }
         
-        /* Check for success/error */
-        if (data->rx_buf.len >= 4 && 
-            memcmp(&data->rx_buf.data[data->rx_buf.len - 4], "OK\r\n", 4) == 0) {
+        /* Check for success/error with more flexible pattern matching */
+        bool success = false;
+        
+        /* Look for "OK" pattern */
+        if (data->rx_buf.len >= 2) {
+            for (size_t i = 0; i < data->rx_buf.len - 1; i++) {
+                if (data->rx_buf.data[i] == 'O' && data->rx_buf.data[i+1] == 'K') {
+                    success = true;
+                    break;
+                }
+            }
+        }
+        
+        if (success) {
             LOG_DBG("Command successful (found OK)");
             ret = 0;  /* Success */
         } else {
             LOG_WRN("Command error response: %.*s", 
-                   data->rx_buf.len > 20 ? 20 : data->rx_buf.len,
+                   data->rx_buf.len > 40 ? 40 : data->rx_buf.len,
                    data->rx_buf.data);
             ret = -EIO;  /* Error */
         }
     } else {
-        LOG_ERR("Command timed out after %d ms", timeout_ms);
-        /* Dump any partial data we might have received */
+        LOG_ERR("Command timed out after %d ms", effective_timeout);
+        /* Try to recover any partial response */
         if (data->rx_buf.len > 0) {
             LOG_WRN("Partial response (%d bytes): %.*s", 
                    data->rx_buf.len,
-                   data->rx_buf.len > 20 ? 20 : data->rx_buf.len,
+                   data->rx_buf.len > 40 ? 40 : data->rx_buf.len,
                    data->rx_buf.data);
         }
+        
+        /* Try to flush any stuck data */
+        emw3080_uart_flush_rx(data->uart);
         ret = -ETIMEDOUT;  /* Timeout */
     }
     

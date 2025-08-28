@@ -128,10 +128,10 @@ static int emw3080_l2_send(struct net_if *iface, struct net_pkt *pkt)
     /* Use the offload implementation for actual packet sending */
     LOG_INF("EMW3080 L2 send: Calling emw3080_offload_send_pkt");
     
-    /* For DHCP packets, we've already handled IP configuration */
+    /* For DHCP packets, we need to allow them through but also handle them internally */
     if (is_dhcp) {
-        LOG_INF("EMW3080 L2: DHCP packet handled, not sending to device");
-        return 0;  /* Successfully handled DHCP packet */
+        LOG_INF("EMW3080 L2: DHCP packet detected, processing and forwarding");
+        /* We still want to let DHCP packets through to the device */
     }
     
     /* Use our implementation from emw3080_offload.c */

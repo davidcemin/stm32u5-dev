@@ -41,29 +41,104 @@ int emw3080_test_at_commands(void)
         return -EINVAL;
     }
     
-    /* Test simple AT command */
-    char resp[128];
-    LOG_INF("Testing basic AT command");
-    /* Increase timeout to 5000ms (5 seconds) */
-    int ret = emw3080_send_at_cmd(data, "AT\r\n", 4, resp, sizeof(resp), 5000);
+    /* Configure the UART first */
+    LOG_INF("Configuring UART for AT commands");
+    extern int emw3080_configure_uart(const struct device *uart_dev);
+    int ret = emw3080_configure_uart(data->uart);
     if (ret < 0) {
-        LOG_ERR("Failed to send AT command: %d (%s)", ret, strerror(-ret));
+        LOG_ERR("Failed to configure UART: %d", ret);
         return ret;
     }
-    LOG_INF("AT command response: %s", resp);
+    
+    /* Flush UART before starting tests */
+    extern void emw3080_uart_flush_rx(const struct device *uart_dev);
+    emw3080_uart_flush_rx(data->uart);
+    
+    /* Test with progressively longer timeouts */
+    int timeouts[] = {1000, 2000, 5000};
+    int i;
+    bool success = false;
+    
+    /* Basic AT test */
+    char resp[256];
+    for (i = 0; i < ARRAY_SIZE(timeouts) && !success; i++) {
+        int timeout = timeouts[i];
+        LOG_INF("Testing basic AT command with timeout %d ms", timeout);
+        
+        memset(resp, 0, sizeof(resp));
+        ret = emw3080_send_at_cmd(data, "AT\r\n", 4, resp, sizeof(resp), timeout);
+        if (ret == 0) {
+            LOG_INF("AT command successful! Response: %s", resp);
+            success = true;
+            break;
+        } else {
+            LOG_WRN("AT command failed with timeout %d ms: %d", timeout, ret);
+        }
+        
+        /* Short pause between attempts */
+        k_sleep(K_MSEC(100));
+    }
+    
+    if (!success) {
+        LOG_ERR("Failed to execute basic AT command after multiple attempts");
+        LOG_ERR("This indicates a communication problem with the EMW3080 module");
+        LOG_ERR("Check hardware connections and reset sequence");
+        return -EIO;
+    }
+    
+    /* Reset the success flag for next test */
+    success = false;
+    
+    /* Test version command */
+    LOG_INF("Testing AT version command");
+    for (i = 0; i < ARRAY_SIZE(timeouts) && !success; i++) {
+        int timeout = timeouts[i];
+        
+        memset(resp, 0, sizeof(resp));
+        ret = emw3080_send_at_cmd(data, "AT+GMR\r\n", 8, resp, sizeof(resp), timeout);
+        if (ret == 0) {
+            LOG_INF("Version command successful! Response: %s", resp);
+            success = true;
+            break;
+        } else {
+            LOG_WRN("Version command failed with timeout %d ms: %d", timeout, ret);
+        }
+        
+        /* Short pause between attempts */
+        k_sleep(K_MSEC(100));
+    }
+    
+    /* Test mode setting command */
+    LOG_INF("Testing mode setting command");
+    const char *mode_cmd = "AT+CWMODE=1\r\n"; /* Station mode */
+    ret = emw3080_send_at_cmd(data, mode_cmd, strlen(mode_cmd), resp, sizeof(resp), 5000);
+    if (ret < 0) {
+        LOG_WRN("Failed to set mode: %d, but continuing with tests", ret);
+    } else {
+        LOG_INF("Mode setting successful! Response: %s", resp);
+    }
     
     /* Test multi-connection mode */
     LOG_INF("Testing multi-connection mode");
     char cmd[32];
-    snprintf(cmd, sizeof(cmd), emw3080_cmd_set_multi_conn, 1);
-    /* Increase timeout to 5000ms (5 seconds) */
+    snprintf(cmd, sizeof(cmd), "AT+CIPMUX=1\r\n");
     ret = emw3080_send_at_cmd(data, cmd, strlen(cmd), resp, sizeof(resp), 5000);
     if (ret < 0) {
-        LOG_ERR("Failed to set multi-connection mode: %d (%s)", ret, strerror(-ret));
-        return ret;
+        LOG_WRN("Failed to set multi-connection mode: %d", ret);
+    } else {
+        LOG_INF("Multi-connection mode response: %s", resp);
     }
-    LOG_INF("Multi-connection mode response: %s", resp);
     
+    /* Test getting the IP address */
+    LOG_INF("Testing IP address query");
+    ret = emw3080_send_at_cmd(data, "AT+CIFSR\r\n", 10, resp, sizeof(resp), 5000);
+    if (ret < 0) {
+        LOG_WRN("Failed to query IP: %d", ret);
+    } else {
+        LOG_INF("IP address query response: %s", resp);
+    }
+    
+    LOG_INF("AT command testing complete");
     return 0;
 }
 

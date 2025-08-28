@@ -303,6 +303,19 @@ int main(void)
         if (is_emw3080) {
             LOG_INF("==== EMW3080 WiFi interface ready! ====");
             
+            /* Initialize the EMW3080 L2 layer */
+            LOG_INF("Initializing the EMW3080 L2 layer");
+            extern void emw3080_l2_init(void);
+            emw3080_l2_init();
+            
+            /* Attach L2 to interface */
+            LOG_INF("Attaching EMW3080 L2 to interface");
+            extern int emw3080_attach_l2_to_iface(struct net_if *iface);
+            ret = emw3080_attach_l2_to_iface(iface);
+            if (ret) {
+                LOG_ERR("Failed to attach L2 to interface: %d", ret);
+            }
+            
             /* Configure IPv4 for the interface */
             LOG_INF("Setting up IPv4 configuration");
             
