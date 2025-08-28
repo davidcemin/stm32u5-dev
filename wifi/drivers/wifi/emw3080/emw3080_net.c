@@ -15,8 +15,10 @@ LOG_MODULE_REGISTER(emw3080_net, CONFIG_LOG_DEFAULT_LEVEL);
 #include <zephyr/net/net_context.h>
 #include <zephyr/net/net_offload.h>
 #include <zephyr/net/wifi_mgmt.h>
+#include <zephyr/net/offloaded_netdev.h>
 
 #include "emw3080_offload_dev.h"
+#include "emw3080_mgmt.h"
 
 /* Forward declarations from emw3080.c */
 extern const struct net_wifi_mgmt_offload emw3080_api;
@@ -68,41 +70,68 @@ static void emw3080_net_iface_init(struct net_if *iface)
     /* Save reference to interface */
     data->iface = iface;
     
+    /* Set the interface in the WiFi management module */
+    emw3080_mgmt_set_iface(iface);
+    
     /* Let the network stack know we're up */
     net_if_flag_set(iface, NET_IF_UP);
     net_if_flag_set(iface, NET_IF_RUNNING);
 }
 
-/* WiFi management API implementations */
-static int emw3080_scan(const struct device *dev, scan_result_cb_t cb)
+/* WiFi management API implementations - delegates to emw3080_mgmt module */
+static int emw3080_scan(const struct device *dev, struct wifi_scan_params *params,
+                       scan_result_cb_t cb)
 {
-    LOG_INF("WiFi scan requested");
-    return -ENOTSUP; /* Not yet implemented */
+    LOG_INF("WiFi scan requested, delegating to mgmt module");
+    return emw3080_mgmt_scan(dev, params, cb);
 }
 
 static int emw3080_connect(const struct device *dev, struct wifi_connect_req_params *params)
 {
-    LOG_INF("WiFi connect requested");
-    return -ENOTSUP; /* Not yet implemented */
+    LOG_INF("WiFi connect requested, delegating to mgmt module");
+    return emw3080_mgmt_connect(dev, params);
 }
 
 static int emw3080_disconnect(const struct device *dev)
 {
-    LOG_INF("WiFi disconnect requested");
-    return -ENOTSUP; /* Not yet implemented */
+    LOG_INF("WiFi disconnect requested, delegating to mgmt module");
+    return emw3080_mgmt_disconnect(dev);
 }
 
-/* Network interface API */
-static const struct net_if_api emw3080_net_if_api = {
-    .init = emw3080_net_iface_init,
+static int emw3080_get_status(const struct device *dev, struct wifi_iface_status *status)
+{
+    LOG_INF("WiFi get status requested, delegating to mgmt module");
+    return emw3080_mgmt_get_status(dev, status);
+}
+
+/* Function to identify this device as WiFi */
+static enum offloaded_net_if_types emw3080_get_type(void)
+{
+    return L2_OFFLOADED_NET_IF_TYPE_WIFI;
+}
+
+/* Network interface API with offloaded capabilities */
+static const struct offloaded_if_api emw3080_offload_if_api = {
+    .iface_api.init = emw3080_net_iface_init,
+    .get_type = emw3080_get_type,
+    /* We don't need enable/disable since we do that via .init */
 };
 
 /* Network offload API from emw3080_offload.c */
 extern const struct net_offload emw3080_offload;
 
+/* Define the WiFi management operations */
+static const struct wifi_mgmt_ops emw3080_wifi_mgmt_ops = {
+    .scan = emw3080_scan,
+    .connect = emw3080_connect,
+    .disconnect = emw3080_disconnect,
+    .iface_status = emw3080_get_status,
+};
+
 /* WiFi management offload structure */
 const struct net_wifi_mgmt_offload emw3080_mgmt_api = {
-    .wifi_iface.iface_api = emw3080_net_if_api,
+    .wifi_iface = emw3080_offload_if_api,
+    .wifi_mgmt_api = &emw3080_wifi_mgmt_ops,
 };
 
 /* Create the network device */
@@ -127,6 +156,8 @@ const struct device *get_emw3080_net_device(void)
             LOG_ERR("EMW3080_NET device not found");
         } else {
             LOG_INF("EMW3080_NET device found");
+            /* Initialize WiFi management functionality */
+            emw3080_mgmt_init();
         }
     }
     

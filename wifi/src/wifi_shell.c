@@ -9,9 +9,14 @@
 /* Helper function to get Wi-Fi interface */
 static struct net_if *get_wifi_iface(void)
 {
-    struct net_if *iface = NULL;
+    /* First try using the official WiFi interface lookup */
+    struct net_if *iface = net_if_get_first_wifi();
+    if (iface != NULL) {
+        return iface;
+    }
+    
+    /* Fallback to manual device name search */
     int i = 0;
-
     while ((iface = net_if_get_by_index(i)) != NULL) {
         /* Check if this interface has our driver */
         const struct device *dev = net_if_get_device(iface);
