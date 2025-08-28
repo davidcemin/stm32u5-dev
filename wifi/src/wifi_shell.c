@@ -12,15 +12,29 @@ static struct net_if *get_wifi_iface(void)
     /* First try using the official WiFi interface lookup */
     struct net_if *iface = net_if_get_first_wifi();
     if (iface != NULL) {
+        const struct device *dev = net_if_get_device(iface);
+        shell_print(NULL, "Found WiFi interface: %s", dev ? dev->name : "unknown");
         return iface;
     }
     
-    /* Fallback to manual device name search */
+    /* Fallback to check if interface is a WiFi offloaded interface */
     int i = 0;
+    while ((iface = net_if_get_by_index(i)) != NULL) {
+        if (net_off_is_wifi_offloaded(iface)) {
+            const struct device *dev = net_if_get_device(iface);
+            shell_print(NULL, "Found offloaded WiFi interface: %s", dev ? dev->name : "unknown");
+            return iface;
+        }
+        i++;
+    }
+    
+    /* Last fallback to manual device name search */
+    i = 0;
     while ((iface = net_if_get_by_index(i)) != NULL) {
         /* Check if this interface has our driver */
         const struct device *dev = net_if_get_device(iface);
         if (dev != NULL && strstr(dev->name, "EMW3080") != NULL) {
+            shell_print(NULL, "Found EMW3080 interface by name: %s", dev->name);
             return iface;
         }
         i++;
@@ -32,6 +46,22 @@ static struct net_if *get_wifi_iface(void)
 /* Wi-Fi scan command */
 static int cmd_wifi_scan(const struct shell *sh, size_t argc, char *argv[])
 {
+    /* Print diagnostic info about all interfaces */
+    struct net_if *all_iface;
+    int i = 0;
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Checking interfaces for WiFi capability:\n");
+    while ((all_iface = net_if_get_by_index(i)) != NULL) {
+        const struct device *dev = net_if_get_device(all_iface);
+        shell_fprintf(sh, SHELL_NORMAL, "IF[%d]: %s - WiFi=%d, Offloaded WiFi=%d\n", 
+                      i, 
+                      dev ? dev->name : "unknown",
+                      net_if_is_wifi(all_iface),
+                      net_off_is_wifi_offloaded(all_iface));
+        i++;
+    }
+    
+    /* Try to get the WiFi interface */
     struct net_if *iface = get_wifi_iface();
     if (!iface) {
         shell_fprintf(sh, SHELL_ERROR, "No Wi-Fi interface found\n");

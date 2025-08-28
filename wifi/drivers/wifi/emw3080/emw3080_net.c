@@ -73,9 +73,11 @@ static void emw3080_net_iface_init(struct net_if *iface)
     /* Set the interface in the WiFi management module */
     emw3080_mgmt_set_iface(iface);
     
-    /* Let the network stack know we're up */
+    /* Set net_if attributes for WIFI management */
     net_if_flag_set(iface, NET_IF_UP);
     net_if_flag_set(iface, NET_IF_RUNNING);
+    
+    LOG_INF("EMW3080 WiFi interface registered and ready");
 }
 
 /* WiFi management API implementations - delegates to emw3080_mgmt module */
@@ -104,18 +106,21 @@ static int emw3080_get_status(const struct device *dev, struct wifi_iface_status
     return emw3080_mgmt_get_status(dev, status);
 }
 
-/* Function to identify this device as WiFi */
+/* Function to identify this device as WiFi - this is crucial for
+ * proper identification by net_if_is_wifi() and net_off_is_wifi_offloaded()
+ */
 static enum offloaded_net_if_types emw3080_get_type(void)
 {
+    LOG_INF("get_type called, reporting device as L2_OFFLOADED_NET_IF_TYPE_WIFI");
     return L2_OFFLOADED_NET_IF_TYPE_WIFI;
 }
 
-/* Network interface API with offloaded capabilities */
-static const struct offloaded_if_api emw3080_offload_if_api = {
-    .iface_api.init = emw3080_net_iface_init,
-    .get_type = emw3080_get_type,
-    /* We don't need enable/disable since we do that via .init */
-};
+/* Function to enable/disable the interface */
+static int emw3080_enable(const struct net_if *iface, bool state)
+{
+    LOG_INF("Enable/disable interface: %s", state ? "UP" : "DOWN");
+    return 0;  /* Always successful for now */
+}
 
 /* Network offload API from emw3080_offload.c */
 extern const struct net_offload emw3080_offload;
@@ -128,13 +133,27 @@ static const struct wifi_mgmt_ops emw3080_wifi_mgmt_ops = {
     .iface_status = emw3080_get_status,
 };
 
-/* WiFi management offload structure */
-const struct net_wifi_mgmt_offload emw3080_mgmt_api = {
-    .wifi_iface = emw3080_offload_if_api,
+/* The net_if_api needs to be the first field in this struct to 
+ * ensure proper type casting in Zephyr's networking stack.
+ * This structure is crucial - it's what makes our interface identifiable as a WiFi device
+ */
+static const struct offloaded_if_api emw3080_mgmt_if_api = {
+    .iface_api.init = emw3080_net_iface_init,
+    .get_type = emw3080_get_type,
+    .enable = emw3080_enable,
+};
+
+/* WiFi management offload structure - this is the structure used by the 
+ * WiFi management subsystem to interface with our driver
+ */
+static struct net_wifi_mgmt_offload emw3080_mgmt_api = {
+    .wifi_iface = emw3080_mgmt_if_api,
     .wifi_mgmt_api = &emw3080_wifi_mgmt_ops,
 };
 
-/* Create the network device */
+/* Create the network device - this is the registration that integrates 
+ * our driver with the Zephyr networking subsystem
+ */
 NET_DEVICE_OFFLOAD_INIT(emw3080_net,
                         "EMW3080_NET",
                         emw3080_net_device_init,
