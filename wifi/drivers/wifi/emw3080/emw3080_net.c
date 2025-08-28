@@ -21,10 +21,7 @@ LOG_MODULE_REGISTER(emw3080_net, CONFIG_LOG_DEFAULT_LEVEL);
 
 #include "emw3080_offload_dev.h"
 #include "emw3080_mgmt.h"
-
-/* Include the L2 interface header */
-extern int emw3080_attach_l2_to_iface(struct net_if *iface);
-extern int emw3080_enable_direct_mode(struct net_if *iface);
+#include "emw3080_l2.h"
 
 /* Forward declarations */
 extern int emw3080_init_with_uart(const struct device *dev, const struct device *uart_dev);
@@ -154,23 +151,16 @@ static void emw3080_net_iface_init(struct net_if *iface)
     /* IMPORTANT: Set up interface properties - this is critical for DHCP to work */
     LOG_INF("Setting up interface properties for EMW3080");
     
-    /* CRITICAL: Attach the L2 interface first - this must happen before setting other properties */
-    int ret = emw3080_attach_l2_to_iface(iface);
-    if (ret != 0) {
-        LOG_ERR("Failed to attach L2 interface: %d", ret);
-    } else {
-        LOG_INF("L2 interface successfully attached");
-    }
-    
     /* Set MAC address for the interface */
     net_if_set_link_addr(iface, data->mac_addr, sizeof(data->mac_addr), NET_LINK_ETHERNET);
     
-    /* Register the offload API directly with the interface */
-    iface->if_dev->offload = &emw3080_offload;
-    LOG_INF("Offload API registered with interface");
+    /* Attach our L2 implementation to the interface */
+    emw3080_attach_l2_to_iface(iface);
     
-    /* Enable direct mode for packet transmission */
-    emw3080_enable_direct_mode(iface);
+    /* Register the offload API directly with the interface.
+     * In modern Zephyr versions, this is done during NET_DEVICE_OFFLOAD_INIT.
+     */
+    LOG_INF("Offload API registered during device initialization");
     
     /* Set flags to enable sending/receiving */
     net_if_flag_set(iface, NET_IF_UP);
@@ -178,12 +168,13 @@ static void emw3080_net_iface_init(struct net_if *iface)
     
     LOG_INF("Interface setup complete");
     
-    /* Check if the interface is identified as WiFi */
+    /* Check if the interface is identified as WiFi and has L2 */
     int is_wifi = net_if_is_wifi(iface);
     int is_offloaded_wifi = net_off_is_wifi_offloaded(iface);
+    struct net_l2 *l2 = net_if_l2(iface);
     
-    LOG_INF("EMW3080 WiFi interface registered and ready. WiFi=%d, Offloaded WiFi=%d",
-           is_wifi, is_offloaded_wifi);
+    LOG_INF("EMW3080 WiFi interface registered and ready. WiFi=%d, Offloaded WiFi=%d, L2=%p",
+           is_wifi, is_offloaded_wifi, l2);
 }
 
 /* Basic initialization function for the network interface */
@@ -198,6 +189,9 @@ static int emw3080_net_device_init(const struct device *dev)
     enum offloaded_net_if_types type = emw3080_get_type();
     LOG_INF("Our get_type function returns: %d (WiFi=%d)", 
            type, (type == L2_OFFLOADED_NET_IF_TYPE_WIFI) ? 1 : 0);
+    
+    /* Initialize our L2 layer */
+    emw3080_l2_init();
     
     /* Directly get UART4 */
     const struct device *uart = DEVICE_DT_GET(DT_NODELABEL(uart4));
@@ -217,18 +211,21 @@ static int emw3080_net_device_init(const struct device *dev)
 /* Create the network device - this is the registration that integrates 
  * our driver with the Zephyr networking subsystem.
  * 
- * We pass &offloaded_if to the macro, which contains both the interface init function 
+ * We use NET_DEVICE_OFFLOAD_INIT to explicitly register this as an offloaded network device
+ * that relies on &offloaded_if API, which contains both the interface init function 
  * and the get_type function needed for WiFi identification.
+ * 
+ * The L2 layer will be registered during interface initialization in emw3080_net_iface_init.
  */
-NET_DEVICE_OFFLOAD_INIT(emw3080_net,
-                        "EMW3080_NET",
-                        emw3080_net_device_init,
-                        NULL,
-                        &emw3080_net_dev_data,
-                        NULL,
-                        CONFIG_WIFI_INIT_PRIORITY,
-                        &offloaded_if,
-                        1500);  /* MTU */
+NET_DEVICE_OFFLOAD_INIT(emw3080_net,                /* Driver name */
+                       "EMW3080_NET",              /* Device name */
+                       emw3080_net_device_init,    /* Init function */
+                       NULL,                       /* PM control */
+                       &emw3080_net_dev_data,      /* Data */
+                       NULL,                       /* Config */
+                       CONFIG_WIFI_INIT_PRIORITY,  /* Priority */
+                       &offloaded_if,              /* API */
+                       1500);                      /* MTU */
 
 /* Function to be called from main to check if network device is ready */
 const struct device *get_emw3080_net_device(void)
