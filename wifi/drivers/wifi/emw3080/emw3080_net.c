@@ -16,6 +16,8 @@ LOG_MODULE_REGISTER(emw3080_net, CONFIG_LOG_DEFAULT_LEVEL);
 #include <zephyr/net/net_offload.h>
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/offloaded_netdev.h>
+#include <zephyr/net/net_l2.h>
+#include <stdbool.h>
 
 #include "emw3080_offload_dev.h"
 #include "emw3080_mgmt.h"
@@ -33,6 +35,8 @@ static int emw3080_scan(const struct device *dev, struct wifi_scan_params *param
 static int emw3080_connect(const struct device *dev, struct wifi_connect_req_params *params);
 static int emw3080_disconnect(const struct device *dev);
 static int emw3080_get_status(const struct device *dev, struct wifi_iface_status *status);
+
+/* We'll use Ethernet L2 as the base for our implementation */
 
 /* Define data structure for network driver */
 struct emw3080_net_data {
@@ -134,9 +138,6 @@ static void emw3080_net_iface_init(struct net_if *iface)
         LOG_ERR("Device API does not have valid get_type function!");
     }
     
-    /* Set MAC address */
-    net_if_set_link_addr(iface, data->mac_addr, sizeof(data->mac_addr), NET_LINK_ETHERNET);
-    
     /* Save reference to interface */
     data->iface = iface;
     
@@ -146,13 +147,25 @@ static void emw3080_net_iface_init(struct net_if *iface)
     /* Initialize WiFi management functionality - critical for WiFi identification */
     emw3080_mgmt_init();
     
-    /* Set net_if attributes for WIFI management */
+    /* IMPORTANT: Set up interface properties - this is critical for DHCP to work */
+    LOG_INF("Setting up interface properties for EMW3080");
+    
+    /* Set MAC address for the interface */
+    net_if_set_link_addr(iface, data->mac_addr, sizeof(data->mac_addr), NET_LINK_ETHERNET);
+    
+    /* Register the offload API directly with the interface */
+    iface->if_dev->offload = &emw3080_offload;
+    LOG_INF("Offload API registered with interface");
+    
+    /* Set flags to enable sending/receiving */
     net_if_flag_set(iface, NET_IF_UP);
     net_if_flag_set(iface, NET_IF_RUNNING);
     
+    LOG_INF("Interface setup complete");
+    
     /* Check if the interface is identified as WiFi */
-    bool is_wifi = net_if_is_wifi(iface);
-    bool is_offloaded_wifi = net_off_is_wifi_offloaded(iface);
+    int is_wifi = net_if_is_wifi(iface);
+    int is_offloaded_wifi = net_off_is_wifi_offloaded(iface);
     
     LOG_INF("EMW3080 WiFi interface registered and ready. WiFi=%d, Offloaded WiFi=%d",
            is_wifi, is_offloaded_wifi);

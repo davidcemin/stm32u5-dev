@@ -17,6 +17,7 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/version.h>
 #include "../drivers/wifi/emw3080/emw3080_debug.h"
+#include "../drivers/wifi/emw3080/emw3080_test.h"
 
 /* Forward declaration for function to get network device */
 extern const struct device *get_emw3080_net_device(void);
@@ -330,19 +331,20 @@ int main(void)
             }
         }
         
-        /* Print usage instructions */
-        LOG_INF("");
-        LOG_INF("==== WiFi Shell Commands ====");
-        LOG_INF("wifi scan                    - Scan for available networks");
-        LOG_INF("wifi connect <SSID> <PSK>    - Connect to a WiFi network");
-        LOG_INF("wifi disconnect              - Disconnect from current network");
-        LOG_INF("wifi status                  - Show current WiFi status");
-        LOG_INF("");
-        LOG_INF("==== Network Commands ====");
-        LOG_INF("net iface                    - Show network interfaces");
-        LOG_INF("net ipv4                     - Show IPv4 addresses");
-    }
+    /* Print usage instructions */
+    LOG_INF("");
+    LOG_INF("==== WiFi Shell Commands ====");
+    LOG_INF("wifi scan                    - Scan for available networks");
+    LOG_INF("wifi connect <SSID> <PSK>    - Connect to a WiFi network");
+    LOG_INF("wifi disconnect              - Disconnect from current network");
+    LOG_INF("wifi status                  - Show current WiFi status");
+    LOG_INF("");
+    LOG_INF("==== Network Commands ====");
+    LOG_INF("net iface                    - Show network interfaces");
+    LOG_INF("net ipv4                     - Show IPv4 addresses");
     
-    LOG_INF("Initialization complete - WiFi sample is running");
+    /* NOTE: L2 test temporarily disabled until linking issues are fixed */
+    LOG_INF("WiFi L2 implementation active");
+}    LOG_INF("Initialization complete - WiFi sample is running");
     return 0;
 }
