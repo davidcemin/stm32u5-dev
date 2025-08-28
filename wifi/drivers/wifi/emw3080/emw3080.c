@@ -21,6 +21,7 @@ LOG_MODULE_REGISTER(emw3080, CONFIG_LOG_DEFAULT_LEVEL);
 #include <zephyr/sys/printk.h>
 
 #include "emw3080.h"
+#include "emw3080_mgmt.h" /* Include the management header for function declarations */
 
 /* EMW3080 specific defines */
 #define EMW3080_MAX_DATA_SIZE 2048
@@ -73,6 +74,9 @@ static void emw3080_iface_init(struct net_if *iface)
     /* Set MAC address (for now using a fixed address) */
     uint8_t mac[6] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 };
     net_if_set_link_addr(iface, mac, sizeof(mac), NET_LINK_ETHERNET);
+    
+    /* Make sure the management interface knows about this interface */
+    emw3080_mgmt_set_iface(iface);
     
     LOG_INF("EMW3080 network interface initialized");
 }
@@ -158,6 +162,9 @@ static int emw3080_init(const struct device *dev)
     /* Initialize work queue for async operations */
     k_work_init(&data->request_work, emw3080_request_handler);
     
+    /* Initialize the WiFi management interface */
+    emw3080_mgmt_init();
+    
     LOG_INF("EMW3080 driver initialized successfully");
     return 0;
 }
@@ -174,32 +181,46 @@ static enum offloaded_net_if_types emw3080_get_type(void)
     return L2_OFFLOADED_NET_IF_TYPE_WIFI;
 }
 
-/* WiFi management operation implementations */
+/* WiFi management operation implementations - now using emw3080_mgmt.c functions */
 static int emw3080_scan(const struct device *dev, 
                        struct wifi_scan_params *params,
                        scan_result_cb_t cb)
 {
-    LOG_INF("EMW3080 scan operation (not yet implemented)");
-    return -ENOTSUP;
+    LOG_INF("EMW3080 scan operation - forwarding to emw3080_mgmt_scan");
+    
+    /* Make sure we have the interface set properly */
+    struct emw3080_data *data = dev->data;
+    if (data && data->iface) {
+        emw3080_mgmt_set_iface(data->iface);
+        LOG_INF("Setting interface %p for scan operation", data->iface);
+    } else {
+        LOG_WRN("No interface found in device data, using default");
+    }
+    
+    /* Forward to the management implementation */
+    return emw3080_mgmt_scan(dev, params, cb);
 }
 
 static int emw3080_connect(const struct device *dev, 
                           struct wifi_connect_req_params *params)
 {
-    LOG_INF("EMW3080 connect operation (not yet implemented)");
-    return -ENOTSUP;
+    LOG_INF("EMW3080 connect operation - forwarding to emw3080_mgmt_connect");
+    /* Forward to the management implementation */
+    return emw3080_mgmt_connect(dev, params);
 }
 
 static int emw3080_disconnect(const struct device *dev)
 {
-    LOG_INF("EMW3080 disconnect operation (not yet implemented)");
-    return -ENOTSUP;
+    LOG_INF("EMW3080 disconnect operation - forwarding to emw3080_mgmt_disconnect");
+    /* Forward to the management implementation */
+    return emw3080_mgmt_disconnect(dev);
 }
 
 static const struct wifi_mgmt_ops emw3080_mgmt_ops = {
     .scan = emw3080_scan,
     .connect = emw3080_connect,
     .disconnect = emw3080_disconnect,
+    /* No get_status in this version of Zephyr's wifi_mgmt_ops structure */
 };
 
 /* Define driver data and config */

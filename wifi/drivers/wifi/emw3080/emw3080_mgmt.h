@@ -17,6 +17,8 @@ extern struct k_work_delayable deliver_scan_result_work;
 /* WiFi management API functions */
 int emw3080_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
                      scan_result_cb_t cb);
+bool emw3080_mgmt_scan_results_ready(void);
+int emw3080_mgmt_get_scan_results(struct wifi_scan_result *results, int max_results, int *count);
 int emw3080_mgmt_connect(const struct device *dev, struct wifi_connect_req_params *params);
 int emw3080_mgmt_disconnect(const struct device *dev);
 int emw3080_mgmt_get_status(const struct device *dev, struct wifi_iface_status *status);

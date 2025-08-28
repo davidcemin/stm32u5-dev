@@ -42,16 +42,15 @@ static struct wifi_iface_status current_status = {
     .mfp = WIFI_MFP_DISABLE
 };
 
-/* Work item to deliver scan results */
+/* Flag to indicate scan results are ready */
+static volatile bool scan_results_ready = false;
+
+/* Work item to prepare scan results for direct access - NO CALLBACK VERSION */
 static void deliver_scan_results_handler(struct k_work *work)
 {
-    LOG_INF("Delivering scan results...");
+    LOG_INF("Preparing scan results for direct access (no callback)...");
     
-    if (!active_scan_cb) {
-        LOG_ERR("No active scan callback");
-        return;
-    }
-    
+    /* SAFETY: Make absolutely sure we have a valid interface */
     if (!scan_iface) {
         LOG_ERR("No scan interface");
         
@@ -64,90 +63,140 @@ static void deliver_scan_results_handler(struct k_work *work)
         LOG_WRN("Using default interface as fallback");
     }
     
-    LOG_INF("Delivering %d scan results to callback at %p", scan_result_count, active_scan_cb);
+    LOG_INF("Processing %d scan results for direct access", scan_result_count);
     
-    /* First notify that scanning has started - no need to use callback directly */
+    /* First notify that scanning has started */
     net_mgmt_event_notify(NET_EVENT_WIFI_SCAN_DONE, scan_iface);
     
-    /* Deliver each scan result */
+    /* Process and sanitize each scan result */
     for (int i = 0; i < scan_result_count && i < EMW3080_MAX_SCAN_RESULTS; i++) {
+        /* Thoroughly validate and sanitize entries */
+        struct wifi_scan_result *result = &scan_results[i];
+        
         /* Skip empty or invalid entries */
-        if (scan_results[i].channel == 0 && 
-            scan_results[i].ssid_length == 0 && 
-            scan_results[i].rssi == 0) {
+        if (result->channel == 0 && 
+            result->ssid_length == 0 && 
+            result->rssi == 0) {
+            LOG_WRN("Skipping empty scan result at index %d", i);
             continue;
         }
         
-        /* Validate the scan result before delivering */
-        if (scan_results[i].ssid_length > 32) {
-            LOG_WRN("Invalid SSID length for result %d, fixing", i);
-            scan_results[i].ssid_length = 32;
-            scan_results[i].ssid[32] = '\0';
+        /* Validate and fix the scan result */
+        if (result->ssid_length > 32) {
+            LOG_WRN("Invalid SSID length for result %d: %d, fixing", i, result->ssid_length);
+            result->ssid_length = 32;
         }
         
-        /* For hidden networks, ensure proper handling */
-        if (scan_results[i].ssid_length == 0) {
-            LOG_INF("Delivering hidden network on channel %d, RSSI=%d", 
-                   scan_results[i].channel, scan_results[i].rssi);
+        /* Ensure SSID is properly null-terminated */
+        result->ssid[result->ssid_length < 32 ? result->ssid_length : 31] = '\0';
+        
+        /* Validate channel number (WiFi channels are typically 1-14) */
+        if (result->channel < 1 || result->channel > 14) {
+            LOG_WRN("Invalid channel number %d for result %d, setting to 1", result->channel, i);
+            result->channel = 1;
+        }
+        
+        /* Validate security type */
+        if (result->security > 7) {  /* Assuming max security type value */
+            LOG_WRN("Invalid security type %d for result %d, setting to 0", result->security, i);
+            result->security = 0;
+        }
+        
+        /* Validate MAC address (just ensure it's not all zeros) */
+        bool mac_valid = false;
+        for (int j = 0; j < 6; j++) {
+            if (result->mac[j] != 0) {
+                mac_valid = true;
+                break;
+            }
+        }
+        
+        if (!mac_valid) {
+            LOG_WRN("Invalid MAC address (all zeros) for result %d, setting dummy MAC", i);
+            for (int j = 0; j < 6; j++) {
+                result->mac[j] = 0x11 + j;
+            }
+        }
+        
+        /* Log what's available */
+        if (result->ssid_length == 0) {
+            LOG_INF("Processed hidden network on channel %d, RSSI=%d", 
+                   result->channel, result->rssi);
         } else {
-            LOG_INF("Delivering scan result %d: SSID=%s, Ch=%d, RSSI=%d", 
-                   i, scan_results[i].ssid, scan_results[i].channel, scan_results[i].rssi);
+            LOG_INF("Processed scan result %d: SSID=%s, Ch=%d, RSSI=%d", 
+                   i, result->ssid, result->channel, result->rssi);
         }
         
-        /* Deliver the scan result with error checking */
-        if (active_scan_cb) {
-            active_scan_cb(scan_iface, 0, &scan_results[i]);
-        } else {
-            LOG_ERR("Callback became NULL during delivery - aborting");
-            return;
-        }
-        
-        /* Small delay between results to simulate real-world behavior */
-        k_sleep(K_MSEC(25));
-        
-        /* Also notify through event system for additional listeners */
+        /* Optionally notify through event system for other listeners */
         net_mgmt_event_notify_with_info(NET_EVENT_WIFI_SCAN_RESULT,
-                                        scan_iface, &scan_results[i],
-                                        sizeof(struct wifi_scan_result));
+                                       scan_iface, result,
+                                       sizeof(struct wifi_scan_result));
     }
     
-    LOG_INF("Sending NULL result to signal end of scan");
-    
-    /* Signal the end of the scan if callback is still valid */
-    if (active_scan_cb) {
-        active_scan_cb(scan_iface, 0, NULL);
-    }
+    /* Mark results as ready for direct access */
+    scan_results_ready = true;
     
     /* Notify through event system as well */
     net_mgmt_event_notify(NET_EVENT_WIFI_SCAN_DONE, scan_iface);
     
-    LOG_INF("Scan results delivery complete");
-    
-    /* Clear the active callback */
-    active_scan_cb = NULL;
+    LOG_INF("Scan results processing complete - data ready for direct access");
 }
 
 /* Initialize the work item */
 K_WORK_DELAYABLE_DEFINE(deliver_scan_result_work, deliver_scan_results_handler);
 
-/* Function to perform a WiFi scan with more realistic behavior */
+/* Function to check if scan results are ready */
+bool emw3080_mgmt_scan_results_ready(void)
+{
+    return scan_results_ready;
+}
+
+/* Function to get scan results directly */
+int emw3080_mgmt_get_scan_results(struct wifi_scan_result *results, int max_results, int *count)
+{
+    if (!results || !count || max_results <= 0) {
+        return -EINVAL;
+    }
+    
+    if (!scan_results_ready) {
+        *count = 0;
+        return -EBUSY;  /* Results not ready yet */
+    }
+    
+    /* Copy the results safely */
+    int copy_count = scan_result_count;
+    if (copy_count > max_results) {
+        copy_count = max_results;
+    }
+    
+    /* Safety: only copy valid results */
+    *count = 0;
+    for (int i = 0; i < copy_count; i++) {
+        if (scan_results[i].channel > 0 || scan_results[i].ssid_length > 0) {
+            memcpy(&results[*count], &scan_results[i], sizeof(struct wifi_scan_result));
+            (*count)++;
+        }
+    }
+    
+    return 0;
+}
+
+/* Function to perform a WiFi scan with safer behavior */
 int emw3080_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
                      scan_result_cb_t cb)
 {
     LOG_INF("EMW3080 WiFi scan initiated");
     
-    /* Validate parameters */
+    /* Validate device parameter */
     if (!dev) {
         LOG_ERR("Invalid device parameter");
         return -EINVAL;
     }
     
-    if (!cb) {
-        LOG_ERR("Invalid callback parameter");
-        return -EINVAL;
-    }
+    /* Reset the results ready flag */
+    scan_results_ready = false;
     
-    /* Store callback for use when delivering results */
+    /* Store callback for compatibility, but we won't use it directly */
     active_scan_cb = cb;
     
     /* Find the interface associated with this device */
@@ -262,10 +311,14 @@ int emw3080_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
     LOG_INF("Scan result 5: SSID=%s, RSSI=%d, Ch=%d", 
             scan_results[4].ssid, scan_results[4].rssi, scan_results[4].channel);
 
-    /* Now deliver the scan results after a short delay */
+    /* Process the results without using callbacks */
     LOG_INF("Scheduling scan results delivery in 500ms (simulating scan time)");
     k_timeout_t delay = K_MSEC(500);  /* Longer delay for realism */
     k_work_schedule_for_queue(&k_sys_work_q, &deliver_scan_result_work, delay);
+    
+    /* If we have a callback, mark the scan as in-progress */
+    /* But we'll only use it for notification, not for delivering results */
+    scan_results_ready = false;
     
     return 0;
 }

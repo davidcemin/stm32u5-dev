@@ -6,6 +6,34 @@
 #include <zephyr/net/offloaded_netdev.h>
 #include <string.h>
 
+/* Include the EMW3080 management header directly to access its API */
+#include "../drivers/wifi/emw3080/emw3080_mgmt.h"
+
+/* Helper function to get the EMW3080 device directly */
+static const struct device *get_emw3080_device(void)
+{
+    /* Look for a device with EMW3080 in the name */
+    int i = 0;
+    
+    for (i = 0; i < CONFIG_NET_IF_MAX_IPV4_COUNT; i++) {
+        struct net_if *tmp = net_if_get_by_index(i);
+        if (!tmp) {
+            continue;
+        }
+        
+        const struct device *dev = net_if_get_device(tmp);
+        if (!dev) {
+            continue;
+        }
+        
+        if (dev->name && strstr(dev->name, "EMW3080") != NULL) {
+            return dev;  /* Return the device directly */
+        }
+    }
+    
+    return NULL;  /* No EMW3080 device found */
+}
+
 /* Helper function to get Wi-Fi interface - ULTRA SAFE IMPLEMENTATION */
 static struct net_if *get_wifi_iface(void)
 {
@@ -34,80 +62,114 @@ static struct net_if *get_wifi_iface(void)
     return NULL;
 }
 
-/* Wi-Fi scan command - completely rewritten for ULTRA safety */
+/* Wi-Fi scan command - ULTRA SAFE POLLING IMPLEMENTATION */
 static int cmd_wifi_scan(const struct shell *sh, size_t argc, char *argv[])
 {
-    /* ULTRA SAFE APPROACH - No assumptions, no complex structures */
-    shell_fprintf(sh, SHELL_NORMAL, "Starting Wi-Fi scan in ultra-safe mode...\n");
+    shell_fprintf(sh, SHELL_NORMAL, "Starting Wi-Fi scan using ULTRA SAFE polling method...\n");
     
-    /* Safely list all interfaces first */
-    struct net_if *all_iface;
-    int i = 0;
-    bool found_emw = false;
-    struct net_if *emw_iface = NULL;
-    
-    shell_fprintf(sh, SHELL_NORMAL, "Checking interfaces by name:\n");
-    
-    /* Safely iterate through all interfaces - AVOID any L2 or WiFi capability checks */
-    for (i = 0; i < CONFIG_NET_IF_MAX_IPV4_COUNT; i++) {
-        all_iface = net_if_get_by_index(i);
-        if (!all_iface) {
-            continue;
-        }
-        
-        const struct device *dev = net_if_get_device(all_iface);
-        
-        /* Only show basic device info - AVOID any L2 or WiFi capability checks */
-        shell_fprintf(sh, SHELL_NORMAL, "IF[%d]: %s\n", i, 
-                    (dev && dev->name) ? dev->name : "unknown");
-        
-        /* Identify EMW3080 interfaces by name */
-        if (dev && dev->name && strstr(dev->name, "EMW3080") != NULL) {
-            shell_fprintf(sh, SHELL_NORMAL, "          EMW3080 interface detected by name\n");
-            found_emw = true;
-            emw_iface = all_iface;
-        }
-    }
-    
-    if (!found_emw) {
-        shell_fprintf(sh, SHELL_ERROR, "No EMW3080 interface found by name\n");
-        shell_fprintf(sh, SHELL_ERROR, "Cannot continue with scan operation\n");
+    /* Get the EMW3080 device directly */
+    const struct device *emw_dev = get_emw3080_device();
+    if (!emw_dev) {
+        shell_fprintf(sh, SHELL_ERROR, "No EMW3080 device found\n");
         return -ENODEV;
     }
     
-    if (!emw_iface) {
-        shell_fprintf(sh, SHELL_ERROR, "EMW3080 interface found but is NULL\n");
-        shell_fprintf(sh, SHELL_ERROR, "Cannot continue with scan operation\n");
-        return -ENODEV;
-    }
-
-    /* Use the interface to start a scan */
-    shell_fprintf(sh, SHELL_NORMAL, "Starting Wi-Fi scan on EMW3080 interface...\n");
+    shell_fprintf(sh, SHELL_NORMAL, "Found EMW3080 device: %s\n", 
+                 emw_dev->name ? emw_dev->name : "unnamed");
     
-    /* Log device info for the scan */
-    const struct device *scan_dev = net_if_get_device(emw_iface);
-    if (scan_dev) {
-        shell_fprintf(sh, SHELL_NORMAL, "Using device: %s\n", 
-                     scan_dev->name ? scan_dev->name : "unnamed");
-    }
-    
-    /* Use a properly zeroed scan params structure to avoid memory issues */
+    /* Use empty scan params structure */
     struct wifi_scan_params scan_params = {0};
     
-    /* Request the scan safely */
-    shell_fprintf(sh, SHELL_NORMAL, "Sending scan request with properly initialized params...\n");
-    
-    /* CRITICAL SAFETY: Use NET_REQUEST_WIFI_SCAN with fully initialized parameters */
-    shell_fprintf(sh, SHELL_NORMAL, "Executing NET_REQUEST_WIFI_SCAN network management request\n");
-    int err = net_mgmt(NET_REQUEST_WIFI_SCAN, emw_iface, &scan_params, sizeof(scan_params));
+    /* Call the EMW3080 management API directly - passing NULL for callback */
+    shell_fprintf(sh, SHELL_NORMAL, "Starting scan (no callback)...\n");
+    int err = emw3080_mgmt_scan(emw_dev, &scan_params, NULL);
     
     if (err) {
-        shell_fprintf(sh, SHELL_ERROR, "Failed to start scan: %d\n", err);
+        shell_fprintf(sh, SHELL_ERROR, "Scan failed: %d\n", err);
         return -EIO;
     }
-
-    shell_fprintf(sh, SHELL_NORMAL, "Scan requested. Results will be reported via events.\n");
-    shell_fprintf(sh, SHELL_NORMAL, "To see scan results, check for Wi-Fi scan result events.\n");
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Scan started. Waiting for results (1 second max)...\n");
+    
+    /* Poll for scan results - safer than callbacks */
+    int retries = 20;  /* 20 * 50ms = 1 second max wait time */
+    while (!emw3080_mgmt_scan_results_ready() && retries > 0) {
+        /* Wait a bit */
+        k_sleep(K_MSEC(50));
+        retries--;
+    }
+    
+    if (!emw3080_mgmt_scan_results_ready()) {
+        shell_fprintf(sh, SHELL_ERROR, "Scan timed out waiting for results\n");
+        return -ETIMEDOUT;
+    }
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Scan results ready - retrieving...\n");
+    shell_fprintf(sh, SHELL_NORMAL, "\n====== WIFI NETWORKS ======\n");
+    
+    /* Get the results directly */
+    struct wifi_scan_result results[10];  /* Max 10 results */
+    int count = 0;
+    
+    err = emw3080_mgmt_get_scan_results(results, 10, &count);
+    if (err) {
+        shell_fprintf(sh, SHELL_ERROR, "Failed to get scan results: %d\n", err);
+        return -EIO;
+    }
+    
+    if (count == 0) {
+        shell_fprintf(sh, SHELL_NORMAL, "No networks found\n");
+        return 0;
+    }
+    
+    /* Display the results safely */
+    for (int i = 0; i < count; i++) {
+        char safe_ssid[33] = {0};
+        
+        shell_fprintf(sh, SHELL_NORMAL, "-------------------------\n");
+        
+        /* Safely handle SSID */
+        if (results[i].ssid_length == 0) {
+            shell_fprintf(sh, SHELL_NORMAL, "Network %d: <hidden>\n", i+1);
+        } else {
+            /* Copy to local buffer for safety */
+            size_t copy_len = results[i].ssid_length;
+            if (copy_len > 32) {
+                copy_len = 32;
+            }
+            memcpy(safe_ssid, results[i].ssid, copy_len);
+            safe_ssid[copy_len] = '\0';
+            
+            shell_fprintf(sh, SHELL_NORMAL, "Network %d: %s\n", i+1, safe_ssid);
+        }
+        
+        /* Display other details */
+        shell_fprintf(sh, SHELL_NORMAL, "  Signal: %d dBm\n", results[i].rssi);
+        shell_fprintf(sh, SHELL_NORMAL, "  Channel: %u\n", results[i].channel);
+        
+        /* Translate security type to string */
+        const char *security;
+        switch (results[i].security) {
+            case WIFI_SECURITY_TYPE_NONE:
+                security = "Open";
+                break;
+            case WIFI_SECURITY_TYPE_PSK:
+                security = "WPA2-PSK";
+                break;
+            case WIFI_SECURITY_TYPE_PSK_SHA256:
+                security = "WPA2-PSK-SHA256";
+                break;
+            case WIFI_SECURITY_TYPE_SAE:
+                security = "WPA3-SAE";
+                break;
+            default:
+                security = "Unknown";
+        }
+        shell_fprintf(sh, SHELL_NORMAL, "  Security: %s\n", security);
+    }
+    
+    shell_fprintf(sh, SHELL_NORMAL, "-------------------------\n");
+    shell_fprintf(sh, SHELL_NORMAL, "%d networks found\n", count);
     return 0;
 }
 
