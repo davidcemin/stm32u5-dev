@@ -73,9 +73,36 @@ static void emw3080_net_iface_init(struct net_if *iface)
     net_if_flag_set(iface, NET_IF_RUNNING);
 }
 
-/* Network device API implementation */
+/* WiFi management API implementations */
+static int emw3080_scan(const struct device *dev, scan_result_cb_t cb)
+{
+    LOG_INF("WiFi scan requested");
+    return -ENOTSUP; /* Not yet implemented */
+}
+
+static int emw3080_connect(const struct device *dev, struct wifi_connect_req_params *params)
+{
+    LOG_INF("WiFi connect requested");
+    return -ENOTSUP; /* Not yet implemented */
+}
+
+static int emw3080_disconnect(const struct device *dev)
+{
+    LOG_INF("WiFi disconnect requested");
+    return -ENOTSUP; /* Not yet implemented */
+}
+
+/* Network interface API */
 static const struct net_if_api emw3080_net_if_api = {
     .init = emw3080_net_iface_init,
+};
+
+/* Network offload API from emw3080_offload.c */
+extern const struct net_offload emw3080_offload;
+
+/* WiFi management offload structure */
+const struct net_wifi_mgmt_offload emw3080_mgmt_api = {
+    .wifi_iface.iface_api = emw3080_net_if_api,
 };
 
 /* Create the network device */
@@ -86,7 +113,7 @@ NET_DEVICE_OFFLOAD_INIT(emw3080_net,
                         &emw3080_net_dev_data,
                         NULL,
                         CONFIG_WIFI_INIT_PRIORITY,
-                        &emw3080_net_if_api,
+                        &emw3080_mgmt_api.wifi_iface,
                         1500);  /* MTU */
 
 /* Function to be called from main to check if network device is ready */

@@ -20,45 +20,8 @@ extern const struct device *get_emw3080_net_device(void);
 
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
-/* Helper function to get payload length since it's missing in newer Zephyr */
-static inline size_t net_mgmt_event_get_payload_len(struct net_mgmt_event_callback *cb)
-{
-    return cb->info_length;
-}
-
 static struct net_mgmt_event_callback wifi_cb;
 static struct net_mgmt_event_callback dhcp_cb;
-
-/* Wi-Fi event handler for Zephyr v4.2.99 */
-static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb,
-                                    uint64_t mgmt_event,
-                                    struct net_if *iface)
-{
-    switch (mgmt_event) {
-    case NET_EVENT_WIFI_CONNECT_RESULT:
-        LOG_INF("Wi-Fi connected");
-        break;
-    case NET_EVENT_WIFI_DISCONNECT_RESULT:
-        LOG_INF("Wi-Fi disconnected");
-        break;
-    case NET_EVENT_WIFI_SCAN_RESULT:
-        {
-            struct wifi_scan_result scan_result;
-            if (net_mgmt_event_get_payload_len(cb) >= sizeof(scan_result)) {
-                memcpy(&scan_result, cb->info, sizeof(scan_result));
-                LOG_INF("Scan result: SSID: %-32s, RSSI: %d",
-                    scan_result.ssid, scan_result.rssi);
-            }
-        }
-        break;
-    case NET_EVENT_WIFI_SCAN_DONE:
-        LOG_INF("Scan complete");
-        break;
-    default:
-        LOG_INF("Unhandled Wi-Fi event: %llu", mgmt_event);
-        break;
-    }
-}
 
 /* DHCP event handler */
 static void dhcp_event_handler(struct net_mgmt_event_callback *cb,
@@ -70,12 +33,60 @@ static void dhcp_event_handler(struct net_mgmt_event_callback *cb,
         struct net_if_ipv4 *ipv4 = iface->config.ip.ipv4;
 
         if (!ipv4) {
+            LOG_ERR("No IPv4 configuration in interface");
             return;
         }
 
-        net_addr_ntop(AF_INET, &ipv4->unicast[0].ipv4.address.in_addr, 
+        /* Get and display IP address information */
+        net_addr_ntop(AF_INET, &ipv4->unicast[0].ipv4.address.in_addr,
                       ip_addr, sizeof(ip_addr));
-        LOG_INF("DHCPv4 address acquired: %s", ip_addr);
+                      
+        LOG_INF("DHCP: Network configuration obtained:");
+        LOG_INF("  IPv4 Address: %s", ip_addr);
+        
+        /* The interface is now fully configured */
+        LOG_INF("Network interface is ready for use");
+    }
+}
+
+/* Helper function to get payload length since it's missing in newer Zephyr */
+static inline size_t net_mgmt_event_get_payload_len(struct net_mgmt_event_callback *cb)
+{
+    return cb->info_length;
+}
+
+/* Wi-Fi event handler for Zephyr v4.2.99 */
+static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb,
+                                    uint64_t mgmt_event,
+                                    struct net_if *iface)
+{
+    switch (mgmt_event) {
+    case NET_EVENT_WIFI_CONNECT_RESULT:
+        LOG_INF("Wi-Fi connected");
+        break;
+        
+    case NET_EVENT_WIFI_DISCONNECT_RESULT:
+        LOG_INF("Wi-Fi disconnected");
+        break;
+        
+    case NET_EVENT_WIFI_SCAN_RESULT:
+        {
+            struct wifi_scan_result scan_result;
+            if (cb->info_length >= sizeof(scan_result)) {
+                memcpy(&scan_result, cb->info, sizeof(scan_result));
+                LOG_INF("Scan result: SSID: %-32s, RSSI: %d, Ch: %d",
+                       scan_result.ssid, scan_result.rssi, scan_result.channel);
+            }
+        }
+        break;
+        
+    case NET_EVENT_WIFI_SCAN_DONE:
+        LOG_INF("Wi-Fi scan completed");
+        break;
+        
+    default:
+        LOG_DBG("Unhandled Wi-Fi event: 0x%08x", (uint32_t)mgmt_event);
+        break;
     }
 }
 
@@ -89,7 +100,27 @@ static struct net_if *get_wifi_iface(void)
     
     LOG_INF("Searching for network interfaces...");
     
-    /* First pass - print all interfaces and identify EMW3080 */
+    /* Look for our specialized EMW3080_NET device first */
+    const struct device *emw3080_net = get_emw3080_net_device();
+    if (emw3080_net && device_is_ready(emw3080_net)) {
+        LOG_INF("Found EMW3080 network device: %s", emw3080_net->name);
+        
+        /* Get the interface for this device */
+        for (int i = 0; i < CONFIG_NET_IF_MAX_IPV4_COUNT; i++) {
+            iface = net_if_get_by_index(i);
+            if (!iface) {
+                continue;
+            }
+            
+            const struct device *dev = net_if_get_device(iface);
+            if (dev == emw3080_net) {
+                LOG_INF("Found EMW3080 network interface");
+                return iface;
+            }
+        }
+    }
+    
+    /* Fall back to scanning all interfaces */
     for (int i = 0; i < CONFIG_NET_IF_MAX_IPV4_COUNT; i++) {
         iface = net_if_get_by_index(i);
         if (!iface) {
@@ -111,7 +142,8 @@ static struct net_if *get_wifi_iface(void)
         if (dev && dev->name) {
             if (strstr(dev->name, "wifi") != NULL || 
                 strstr(dev->name, "WIFI") != NULL ||
-                strstr(dev->name, "WiFi") != NULL) {
+                strstr(dev->name, "WiFi") != NULL ||
+                strstr(dev->name, "EMW3080") != NULL) {
                 is_wifi = true;
                 if (!wifi_iface) {
                     wifi_iface = iface;
@@ -124,12 +156,6 @@ static struct net_if *get_wifi_iface(void)
                 i, dev ? dev->name : "unknown",
                 is_wifi ? "WiFi" : "Other", 
                 net_if_get_mtu(iface));
-        
-        /* Specifically look for our EMW3080 device */
-        if (dev && dev->name && strstr(dev->name, "EMW3080") != NULL) {
-            LOG_INF("Found EMW3080 interface: %d", i);
-            return iface;  /* EMW3080 found - return immediately */
-        }
     }
 
     /* No interfaces at all */
@@ -165,14 +191,6 @@ int main(void)
     extern int emw3080_fallback_init(void);
     emw3080_fallback_init();
     
-    /* Check if our specialized network device is available */
-    const struct device *net_dev = get_emw3080_net_device();
-    if (net_dev && device_is_ready(net_dev)) {
-        LOG_INF("Found EMW3080 network device: %s", net_dev->name);
-    } else {
-        LOG_WRN("EMW3080 network device not ready or not found");
-    }
-    
     /* Wait a bit for network interfaces to initialize */
     k_sleep(K_MSEC(500));
     
@@ -190,7 +208,7 @@ int main(void)
                                 NET_EVENT_IPV4_ADDR_ADD);
     net_mgmt_add_event_callback(&dhcp_cb);
 
-    /* Check network interfaces again after fallback init */
+    /* Check network interfaces after fallback init */
     iface = get_wifi_iface();
     if (!iface) {
         LOG_ERR("No network interfaces available");
@@ -206,7 +224,7 @@ int main(void)
         LOG_INF("- CONFIG_NET_OFFLOAD is %s", IS_ENABLED(CONFIG_NET_OFFLOAD) ? "enabled" : "disabled");
         LOG_INF("- CONFIG_NET_SOCKETS_OFFLOAD is %s", IS_ENABLED(CONFIG_NET_SOCKETS_OFFLOAD) ? "enabled" : "disabled");
         
-        /* Create a dummy interface to allow shell commands to work */
+        /* Shell commands will still work for device diagnostics */
         LOG_INF("Shell commands will still work for device diagnostics");
         LOG_INF("Try 'device list' to see all devices");
         LOG_INF("Try 'net iface' to check network interfaces");
