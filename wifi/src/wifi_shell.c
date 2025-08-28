@@ -1,19 +1,117 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_mgmt.h>
+#include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/net_core.h>
+#include <zephyr/net/offloaded_netdev.h>
 #include <string.h>
 
-/* Simplified network info command since WiFi specific APIs aren't available */
-static int cmd_network_info(const struct shell *sh, size_t argc, char *argv[])
+/* Helper function to get Wi-Fi interface */
+static struct net_if *get_wifi_iface(void)
 {
-    struct net_if *iface = net_if_get_default();
+    struct net_if *iface = NULL;
+    int i = 0;
+
+    while ((iface = net_if_get_by_index(i)) != NULL) {
+        /* Check if this interface has our driver */
+        const struct device *dev = net_if_get_device(iface);
+        if (dev != NULL && strstr(dev->name, "EMW3080") != NULL) {
+            return iface;
+        }
+        i++;
+    }
+
+    return NULL;
+}
+
+/* Wi-Fi scan command */
+static int cmd_wifi_scan(const struct shell *sh, size_t argc, char *argv[])
+{
+    struct net_if *iface = get_wifi_iface();
     if (!iface) {
-        shell_fprintf(sh, SHELL_ERROR, "No network interface found\n");
+        shell_fprintf(sh, SHELL_ERROR, "No Wi-Fi interface found\n");
         return -ENODEV;
     }
 
-    shell_fprintf(sh, SHELL_NORMAL, "Network interface: %p\n", iface);
+    shell_fprintf(sh, SHELL_NORMAL, "Starting Wi-Fi scan...\n");
+    
+    if (net_mgmt(NET_REQUEST_WIFI_SCAN, iface, NULL, 0)) {
+        shell_fprintf(sh, SHELL_ERROR, "Failed to start scan\n");
+        return -EIO;
+    }
+
+    shell_fprintf(sh, SHELL_NORMAL, "Scan requested. Results will be reported via events.\n");
+    return 0;
+}
+
+/* Wi-Fi connect command */
+static int cmd_wifi_connect(const struct shell *sh, size_t argc, char *argv[])
+{
+    struct net_if *iface = get_wifi_iface();
+    
+    if (!iface) {
+        shell_fprintf(sh, SHELL_ERROR, "No Wi-Fi interface found\n");
+        return -ENODEV;
+    }
+    
+    if (argc < 3) {
+        shell_fprintf(sh, SHELL_ERROR,
+                      "Usage: wifi connect <SSID> <PSK>\n");
+        return -EINVAL;
+    }
+
+    struct wifi_connect_req_params params = { 0 };
+    
+    params.ssid = argv[1];
+    params.ssid_length = strlen(argv[1]);
+    
+    params.psk = argv[2];
+    params.psk_length = strlen(argv[2]);
+    
+    params.channel = WIFI_CHANNEL_ANY;
+    params.security = WIFI_SECURITY_TYPE_PSK;
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Connecting to SSID: %s...\n", argv[1]);
+    
+    if (net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &params, sizeof(params))) {
+        shell_fprintf(sh, SHELL_ERROR, "Connection request failed\n");
+        return -EIO;
+    }
+
+    return 0;
+}
+
+/* Wi-Fi disconnect command */
+static int cmd_wifi_disconnect(const struct shell *sh, size_t argc, char *argv[])
+{
+    struct net_if *iface = get_wifi_iface();
+    
+    if (!iface) {
+        shell_fprintf(sh, SHELL_ERROR, "No Wi-Fi interface found\n");
+        return -ENODEV;
+    }
+
+    shell_fprintf(sh, SHELL_NORMAL, "Disconnecting from Wi-Fi network...\n");
+    
+    if (net_mgmt(NET_REQUEST_WIFI_DISCONNECT, iface, NULL, 0)) {
+        shell_fprintf(sh, SHELL_ERROR, "Disconnect request failed\n");
+        return -EIO;
+    }
+
+    return 0;
+}
+
+/* Wi-Fi status command */
+static int cmd_wifi_status(const struct shell *sh, size_t argc, char *argv[])
+{
+    struct net_if *iface = get_wifi_iface();
+    
+    if (!iface) {
+        shell_fprintf(sh, SHELL_ERROR, "No Wi-Fi interface found\n");
+        return -ENODEV;
+    }
+
+    shell_fprintf(sh, SHELL_NORMAL, "Wi-Fi Interface: %p\n", iface);
     shell_fprintf(sh, SHELL_NORMAL, "Status: %s\n", 
                   net_if_is_up(iface) ? "UP" : "DOWN");
     
@@ -35,45 +133,41 @@ static int cmd_network_info(const struct shell *sh, size_t argc, char *argv[])
 }
 
 /* Network interface up/down command */
-static int cmd_network_state(const struct shell *sh, size_t argc, char *argv[])
+static int cmd_wifi_power(const struct shell *sh, size_t argc, char *argv[])
 {
-    bool up;
-    struct net_if *iface = net_if_get_default();
+    struct net_if *iface = get_wifi_iface();
     
     if (!iface) {
-        shell_fprintf(sh, SHELL_ERROR, "No network interface found\n");
+        shell_fprintf(sh, SHELL_ERROR, "No Wi-Fi interface found\n");
         return -ENODEV;
     }
     
     if (argc < 2) {
-        shell_fprintf(sh, SHELL_ERROR, "Usage: net state <up|down>\n");
+        shell_fprintf(sh, SHELL_ERROR, "Usage: wifi power <on|off>\n");
         return -EINVAL;
     }
 
-    if (strcmp(argv[1], "up") == 0) {
-        up = true;
-    } else if (strcmp(argv[1], "down") == 0) {
-        up = false;
+    if (strcmp(argv[1], "on") == 0) {
+        net_if_up(iface);
+        shell_fprintf(sh, SHELL_NORMAL, "Wi-Fi interface powered ON\n");
+    } else if (strcmp(argv[1], "off") == 0) {
+        net_if_down(iface);
+        shell_fprintf(sh, SHELL_NORMAL, "Wi-Fi interface powered OFF\n");
     } else {
         shell_fprintf(sh, SHELL_ERROR, "Invalid argument: %s\n", argv[1]);
         return -EINVAL;
     }
 
-    if (up) {
-        net_if_up(iface);
-        shell_fprintf(sh, SHELL_NORMAL, "Network interface UP\n");
-    } else {
-        net_if_down(iface);
-        shell_fprintf(sh, SHELL_NORMAL, "Network interface DOWN\n");
-    }
-
     return 0;
 }
 
-SHELL_STATIC_SUBCMD_SET_CREATE(net_cmds,
-    SHELL_CMD(info, NULL, "Show network interface information", cmd_network_info),
-    SHELL_CMD(state, NULL, "Set network interface state: net state <up|down>", cmd_network_state),
+SHELL_STATIC_SUBCMD_SET_CREATE(wifi_cmds,
+    SHELL_CMD(scan, NULL, "Scan for Wi-Fi networks", cmd_wifi_scan),
+    SHELL_CMD(connect, NULL, "Connect: wifi connect <SSID> <PSK>", cmd_wifi_connect),
+    SHELL_CMD(disconnect, NULL, "Disconnect from Wi-Fi network", cmd_wifi_disconnect),
+    SHELL_CMD(status, NULL, "Show Wi-Fi interface status", cmd_wifi_status),
+    SHELL_CMD(power, NULL, "Power on/off Wi-Fi: wifi power <on|off>", cmd_wifi_power),
     SHELL_SUBCMD_SET_END
 );
 
-SHELL_CMD_REGISTER(net, &net_cmds, "Network commands", NULL);
+SHELL_CMD_REGISTER(wifi, &wifi_cmds, "Wi-Fi commands", NULL);

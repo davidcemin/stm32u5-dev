@@ -1,0 +1,17 @@
+# Copyright (c) 2025 David Cemin
+# SPDX-License-Identifier: Apache-2.0
+
+description: MXCHIP EMW3080 WiFi module driver (AT Commands)
+
+compatible: "mxchip,emw3080"
+
+include: uart-device.yaml
+
+properties:
+  reset-gpios:
+    type: phandle-array
+    description: Reset GPIO for the EMW3080 module
+
+  power-gpios:
+    type: phandle-array
+    description: Power GPIO for the EMW3080 module

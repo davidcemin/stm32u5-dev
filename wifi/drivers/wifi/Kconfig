@@ -1,0 +1,14 @@
+# Copyright (c) 2025 David Cemin
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig WIFI_DRIVERS
+	bool "WiFi Drivers"
+	depends on WIFI
+	help
+	  Enable WiFi drivers
+
+if WIFI_DRIVERS
+
+source "$(dirname ${BASH_SOURCE[0]})/emw3080/Kconfig.emw3080"
+
+endif # WIFI_DRIVERS
