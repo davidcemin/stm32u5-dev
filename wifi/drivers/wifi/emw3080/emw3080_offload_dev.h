@@ -16,13 +16,13 @@
 extern const struct net_wifi_mgmt_offload emw3080_api;
 
 /* Return the WiFi type for device type identification */
-static enum offloaded_net_if_types emw3080_get_interface_type(void)
+static __maybe_unused enum offloaded_net_if_types emw3080_get_interface_type(void)
 {
     return L2_OFFLOADED_NET_IF_TYPE_WIFI;
 }
 
 /* Function to initialize the device */
-static int emw3080_net_init(const struct device *dev)
+static __maybe_unused int emw3080_net_init(const struct device *dev)
 {
     /* Get the uart device */
     const struct device *uart = DEVICE_DT_GET(DT_NODELABEL(uart4));

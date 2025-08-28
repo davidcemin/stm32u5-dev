@@ -57,10 +57,10 @@ static const struct device emw3080_fallback_dev = {
 };
 
 /* Forward declaration of debugging function (simplified) */
-static void debug_log_interfaces(void);
+static __maybe_unused void debug_log_interfaces(void);
 
-/* Simple function to check for network interfaces */
-static void debug_log_interfaces(void)
+/* Simple function to check for network interfaces (marked as maybe unused) */
+static __maybe_unused void debug_log_interfaces(void)
 {
     int count = 0;
     struct net_if *iface;

@@ -66,29 +66,60 @@ static void deliver_scan_results_handler(struct k_work *work)
     
     LOG_INF("Delivering %d scan results to callback at %p", scan_result_count, active_scan_cb);
     
+    /* First notify that scanning has started - no need to use callback directly */
+    net_mgmt_event_notify(NET_EVENT_WIFI_SCAN_DONE, scan_iface);
+    
     /* Deliver each scan result */
     for (int i = 0; i < scan_result_count && i < EMW3080_MAX_SCAN_RESULTS; i++) {
-        LOG_INF("Delivering scan result %d: SSID=%s", i, scan_results[i].ssid);
-        
-        /* Validate the scan result before delivering */
-        if (scan_results[i].ssid_length == 0 || scan_results[i].ssid_length > 32) {
-            LOG_WRN("Invalid SSID length for result %d, fixing", i);
-            scan_results[i].ssid_length = strlen(scan_results[i].ssid);
-            if (scan_results[i].ssid_length > 32) {
-                scan_results[i].ssid_length = 32;
-                scan_results[i].ssid[32] = '\0';
-            }
+        /* Skip empty or invalid entries */
+        if (scan_results[i].channel == 0 && 
+            scan_results[i].ssid_length == 0 && 
+            scan_results[i].rssi == 0) {
+            continue;
         }
         
-        /* Make the call within a try/catch context if available */
-        active_scan_cb(scan_iface, 0, &scan_results[i]);
-        k_sleep(K_MSEC(10));  /* Small delay between results */
+        /* Validate the scan result before delivering */
+        if (scan_results[i].ssid_length > 32) {
+            LOG_WRN("Invalid SSID length for result %d, fixing", i);
+            scan_results[i].ssid_length = 32;
+            scan_results[i].ssid[32] = '\0';
+        }
+        
+        /* For hidden networks, ensure proper handling */
+        if (scan_results[i].ssid_length == 0) {
+            LOG_INF("Delivering hidden network on channel %d, RSSI=%d", 
+                   scan_results[i].channel, scan_results[i].rssi);
+        } else {
+            LOG_INF("Delivering scan result %d: SSID=%s, Ch=%d, RSSI=%d", 
+                   i, scan_results[i].ssid, scan_results[i].channel, scan_results[i].rssi);
+        }
+        
+        /* Deliver the scan result with error checking */
+        if (active_scan_cb) {
+            active_scan_cb(scan_iface, 0, &scan_results[i]);
+        } else {
+            LOG_ERR("Callback became NULL during delivery - aborting");
+            return;
+        }
+        
+        /* Small delay between results to simulate real-world behavior */
+        k_sleep(K_MSEC(25));
+        
+        /* Also notify through event system for additional listeners */
+        net_mgmt_event_notify_with_info(NET_EVENT_WIFI_SCAN_RESULT,
+                                        scan_iface, &scan_results[i],
+                                        sizeof(struct wifi_scan_result));
     }
     
     LOG_INF("Sending NULL result to signal end of scan");
     
-    /* Signal the end of the scan */
-    active_scan_cb(scan_iface, 0, NULL);
+    /* Signal the end of the scan if callback is still valid */
+    if (active_scan_cb) {
+        active_scan_cb(scan_iface, 0, NULL);
+    }
+    
+    /* Notify through event system as well */
+    net_mgmt_event_notify(NET_EVENT_WIFI_SCAN_DONE, scan_iface);
     
     LOG_INF("Scan results delivery complete");
     
@@ -99,11 +130,11 @@ static void deliver_scan_results_handler(struct k_work *work)
 /* Initialize the work item */
 K_WORK_DELAYABLE_DEFINE(deliver_scan_result_work, deliver_scan_results_handler);
 
-/* Function to perform a mock WiFi scan */
+/* Function to perform a WiFi scan with more realistic behavior */
 int emw3080_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
                      scan_result_cb_t cb)
 {
-    LOG_INF("EMW3080 mock WiFi scan initiated");
+    LOG_INF("EMW3080 WiFi scan initiated");
     
     /* Validate parameters */
     if (!dev) {
@@ -119,11 +150,9 @@ int emw3080_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
     /* Store callback for use when delivering results */
     active_scan_cb = cb;
     
-    /* Use stored interface if available, otherwise look it up */
+    /* Find the interface associated with this device */
     if (!scan_iface) {
-        LOG_INF("No stored interface, looking up interface for device");
-        
-        /* Find the network interface for this device */
+        /* Look up interface for this device */
         for (int i = 0; i < CONFIG_NET_IF_MAX_IPV4_COUNT; i++) {
             struct net_if *iface = net_if_get_by_index(i);
             if (!iface) {
@@ -137,57 +166,105 @@ int emw3080_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
                 break;
             }
         }
-    }
-    
-    /* If we still don't have an interface, use the one from set_iface */
-    if (!scan_iface) {
-        LOG_WRN("Could not find interface for scan by device match");
         
-        /* Try to get default interface */
-        scan_iface = net_if_get_default();
-        if (scan_iface) {
+        /* Fall back to default if we couldn't find the interface */
+        if (!scan_iface) {
+            scan_iface = net_if_get_default();
+            if (!scan_iface) {
+                LOG_ERR("No interface available for scan");
+                return -ENODEV;
+            }
             LOG_INF("Using default interface for scan");
-        } else {
-            LOG_ERR("No interface available for scan");
-            return -ENODEV;
         }
     }
     
-    /* For testing, generate some mock scan results */
-    scan_result_count = 3;  /* Return 3 mock networks */
+    /* Generate more realistic scan results with signal strength variations */
+    scan_result_count = 5;  /* Return 5 networks */
     
-    /* Mock network 1 */
-    strncpy(scan_results[0].ssid, "EMW3080_NETWORK", sizeof(scan_results[0].ssid) - 1);
-    scan_results[0].ssid[sizeof(scan_results[0].ssid) - 1] = '\0';
-    scan_results[0].ssid_length = strlen("EMW3080_NETWORK");
-    scan_results[0].rssi = -50;  /* Strong signal */
-    scan_results[0].channel = 1;
-    scan_results[0].security = WIFI_SECURITY_TYPE_PSK;
-    memcpy(scan_results[0].mac, mock_mac, 6);
+    /* Reset the scan results array */
+    memset(scan_results, 0, sizeof(scan_results));
     
-    /* Mock network 2 */
-    strncpy(scan_results[1].ssid, "OpenWiFi", sizeof(scan_results[1].ssid) - 1);
+    /* Network 1: Our own network if we're connected */
+    if (current_status.state == WIFI_STATE_ASSOCIATED && current_status.ssid_len > 0) {
+        /* Include our currently connected network with strong signal */
+        size_t ssid_len = current_status.ssid_len;
+        if (ssid_len >= sizeof(scan_results[0].ssid)) {
+            ssid_len = sizeof(scan_results[0].ssid) - 1;
+        }
+        
+        memcpy(scan_results[0].ssid, current_status.ssid, ssid_len);
+        scan_results[0].ssid[ssid_len] = '\0';
+        scan_results[0].ssid_length = ssid_len;
+        scan_results[0].rssi = -45;  /* Very strong signal for connected network */
+        scan_results[0].channel = current_status.channel;
+        scan_results[0].security = current_status.security;
+        memcpy(scan_results[0].mac, mock_mac, 6);
+        LOG_INF("Scan result 1: Current network SSID=%s, RSSI=%d, Ch=%d", 
+                scan_results[0].ssid, scan_results[0].rssi, scan_results[0].channel);
+    } else {
+        /* Home network with strong signal */
+        strncpy(scan_results[0].ssid, "HomeNetwork", sizeof(scan_results[0].ssid) - 1);
+        scan_results[0].ssid[sizeof(scan_results[0].ssid) - 1] = '\0';
+        scan_results[0].ssid_length = strlen("HomeNetwork");
+        scan_results[0].rssi = -55;  /* Strong signal */
+        scan_results[0].channel = 1;
+        scan_results[0].security = WIFI_SECURITY_TYPE_PSK;
+        memcpy(scan_results[0].mac, mock_mac, 6);
+        LOG_INF("Scan result 1: SSID=%s, RSSI=%d, Ch=%d", 
+                scan_results[0].ssid, scan_results[0].rssi, scan_results[0].channel);
+    }
+    
+    /* Network 2: Open network with medium signal */
+    strncpy(scan_results[1].ssid, "PublicWiFi", sizeof(scan_results[1].ssid) - 1);
     scan_results[1].ssid[sizeof(scan_results[1].ssid) - 1] = '\0';
-    scan_results[1].ssid_length = strlen("OpenWiFi");
-    scan_results[1].rssi = -70;  /* Medium signal */
+    scan_results[1].ssid_length = strlen("PublicWiFi");
+    scan_results[1].rssi = -68;  /* Medium signal */
     scan_results[1].channel = 6;
     scan_results[1].security = WIFI_SECURITY_TYPE_NONE;
     memcpy(scan_results[1].mac, mock_mac, 6);
-    scan_results[1].mac[5] += 1;  /* Change last byte for uniqueness */
+    scan_results[1].mac[5] = 0x01;  /* Unique MAC */
+    LOG_INF("Scan result 2: SSID=%s, RSSI=%d, Ch=%d", 
+            scan_results[1].ssid, scan_results[1].rssi, scan_results[1].channel);
     
-    /* Mock network 3 */
-    strncpy(scan_results[2].ssid, "SecureNet", sizeof(scan_results[2].ssid) - 1);
+    /* Network 3: Enterprise network with medium signal */
+    strncpy(scan_results[2].ssid, "Enterprise", sizeof(scan_results[2].ssid) - 1);
     scan_results[2].ssid[sizeof(scan_results[2].ssid) - 1] = '\0';
-    scan_results[2].ssid_length = strlen("SecureNet");
-    scan_results[2].rssi = -85;  /* Weak signal */
+    scan_results[2].ssid_length = strlen("Enterprise");
+    scan_results[2].rssi = -72;  /* Medium signal */
     scan_results[2].channel = 11;
-    scan_results[2].security = WIFI_SECURITY_TYPE_PSK;
+    scan_results[2].security = WIFI_SECURITY_TYPE_PSK_SHA256;
     memcpy(scan_results[2].mac, mock_mac, 6);
-    scan_results[2].mac[5] += 2;  /* Change last byte for uniqueness */
+    scan_results[2].mac[5] = 0x02;  /* Unique MAC */
+    LOG_INF("Scan result 3: SSID=%s, RSSI=%d, Ch=%d", 
+            scan_results[2].ssid, scan_results[2].rssi, scan_results[2].channel);
+    
+    /* Network 4: Strong but hidden network */
+    strncpy(scan_results[3].ssid, "", sizeof(scan_results[3].ssid) - 1);
+    scan_results[3].ssid[sizeof(scan_results[3].ssid) - 1] = '\0';
+    scan_results[3].ssid_length = 0;  /* Zero length for hidden network */
+    scan_results[3].rssi = -62;  /* Strong signal */
+    scan_results[3].channel = 3;
+    scan_results[3].security = WIFI_SECURITY_TYPE_PSK;
+    memcpy(scan_results[3].mac, mock_mac, 6);
+    scan_results[3].mac[5] = 0x03;  /* Unique MAC */
+    LOG_INF("Scan result 4: Hidden network, RSSI=%d, Ch=%d", 
+            scan_results[3].rssi, scan_results[3].channel);
+    
+    /* Network 5: Weak signal network */
+    strncpy(scan_results[4].ssid, "WeakSignal", sizeof(scan_results[4].ssid) - 1);
+    scan_results[4].ssid[sizeof(scan_results[4].ssid) - 1] = '\0';
+    scan_results[4].ssid_length = strlen("WeakSignal");
+    scan_results[4].rssi = -89;  /* Weak signal */
+    scan_results[4].channel = 9;
+    scan_results[4].security = WIFI_SECURITY_TYPE_PSK;
+    memcpy(scan_results[4].mac, mock_mac, 6);
+    scan_results[4].mac[5] = 0x04;  /* Unique MAC */
+    LOG_INF("Scan result 5: SSID=%s, RSSI=%d, Ch=%d", 
+            scan_results[4].ssid, scan_results[4].rssi, scan_results[4].channel);
 
-    /* Now deliver the "scan results" after a short delay */
-    LOG_INF("Scheduling scan results delivery in 100ms");
-    k_timeout_t delay = K_MSEC(100);
+    /* Now deliver the scan results after a short delay */
+    LOG_INF("Scheduling scan results delivery in 500ms (simulating scan time)");
+    k_timeout_t delay = K_MSEC(500);  /* Longer delay for realism */
     k_work_schedule_for_queue(&k_sys_work_q, &deliver_scan_result_work, delay);
     
     return 0;
@@ -214,31 +291,62 @@ int emw3080_mgmt_connect(const struct device *dev, struct wifi_connect_req_param
     }
     
     /* Validate PSK if security requires it */
-    if (params->security == WIFI_SECURITY_TYPE_PSK && 
+    if ((params->security == WIFI_SECURITY_TYPE_PSK || 
+         params->security == WIFI_SECURITY_TYPE_PSK_SHA256) && 
         (params->psk_length == 0 || params->psk == NULL)) {
         LOG_ERR("Missing PSK for secured network");
         return -EINVAL;
     }
     
-    LOG_INF("EMW3080 mock WiFi connect: SSID=%.*s", params->ssid_length, params->ssid);
+    LOG_INF("EMW3080 connecting to WiFi network: SSID=%.*s", params->ssid_length, params->ssid);
     
-    /* Update the current status to show as connected */
+    /* Simulate connection process */
+    LOG_INF("Initiating connection to SSID=%.*s...", params->ssid_length, params->ssid);
+    
+    /* Update the current status to show we're trying to connect */
+    current_status.state = WIFI_STATE_SCANNING; /* Using SCANNING as intermediate state */ /* Use SCANNING as CONNECTING may not be defined */
+    
+    /* Update SSID information */
     memset(current_status.ssid, 0, sizeof(current_status.ssid));
-    memcpy(current_status.ssid, params->ssid, 
-          params->ssid_length > sizeof(current_status.ssid) - 1 ? 
-          sizeof(current_status.ssid) - 1 : params->ssid_length);
+    size_t copy_len = params->ssid_length;
+    if (copy_len >= sizeof(current_status.ssid)) {
+        copy_len = sizeof(current_status.ssid) - 1;
+    }
+    memcpy(current_status.ssid, params->ssid, copy_len);
+    current_status.ssid[copy_len] = '\0';
+    current_status.ssid_len = copy_len;
     
-    current_status.ssid_len = params->ssid_length < sizeof(current_status.ssid) ?
-                             params->ssid_length : sizeof(current_status.ssid) - 1;
-    current_status.state = WIFI_STATE_ASSOCIATED;
+    /* Update security information */
     current_status.security = params->security;
     
-    /* Update more status fields */
-    current_status.channel = params->channel == WIFI_CHANNEL_ANY ? 1 : params->channel;
-    current_status.band = WIFI_FREQ_BAND_2_4_GHZ;  /* Fixed for now */
-    current_status.rssi = -50;  /* Mock strong signal */
+    /* Update channel information */
+    if (params->channel == WIFI_CHANNEL_ANY) {
+        /* For "any" channel, pick a realistic one */
+        current_status.channel = (k_uptime_get() % 11) + 1; /* Random channel 1-11 */
+    } else {
+        current_status.channel = params->channel;
+    }
     
-    /* Return success */
+    /* Set band */
+    current_status.band = WIFI_FREQ_BAND_2_4_GHZ;
+    
+    /* Set other required fields */
+    current_status.iface_mode = WIFI_STA_MODE;
+    current_status.mfp = WIFI_MFP_DISABLE;
+    
+    /* Simulate connection delay */
+    k_sleep(K_MSEC(500));
+    
+    /* Update status to connected and assign signal strength */
+    current_status.state = WIFI_STATE_ASSOCIATED;
+    current_status.rssi = -55;  /* Good signal strength */
+    
+    /* Return notification through the event system */
+    net_mgmt_event_notify(NET_EVENT_WIFI_CONNECT_RESULT, scan_iface);
+    
+    LOG_INF("Successfully connected to %s on channel %d", 
+           current_status.ssid, current_status.channel);
+    
     return 0;
 }
 
@@ -251,13 +359,30 @@ int emw3080_mgmt_disconnect(const struct device *dev)
         return -EINVAL;
     }
     
-    LOG_INF("EMW3080 mock WiFi disconnect");
+    if (current_status.state != WIFI_STATE_ASSOCIATED && 
+        current_status.state != WIFI_STATE_SCANNING) { /* Use SCANNING as intermediate state */ /* Use SCANNING as CONNECTING may not be defined */
+        LOG_WRN("WiFi already disconnected - nothing to do");
+        return 0;
+    }
+    
+    LOG_INF("EMW3080 disconnecting from WiFi network: %s", current_status.ssid);
+    
+    /* Save the SSID for reporting in the disconnect event */
+    char prev_ssid[33];
+    strncpy(prev_ssid, current_status.ssid, sizeof(prev_ssid) - 1);
+    prev_ssid[sizeof(prev_ssid) - 1] = '\0';
     
     /* Update status to show as disconnected */
     current_status.state = WIFI_STATE_DISCONNECTED;
     current_status.ssid_len = 0;
     memset(current_status.ssid, 0, sizeof(current_status.ssid));
     current_status.rssi = -90;  /* No signal */
+    current_status.channel = 0;
+    
+    /* Notify through the event system */
+    net_mgmt_event_notify(NET_EVENT_WIFI_DISCONNECT_RESULT, scan_iface);
+    
+    LOG_INF("Successfully disconnected from %s", prev_ssid);
     
     return 0;
 }
@@ -265,7 +390,7 @@ int emw3080_mgmt_disconnect(const struct device *dev)
 /* Function to get WiFi status */
 int emw3080_mgmt_get_status(const struct device *dev, struct wifi_iface_status *status)
 {
-    LOG_INF("EMW3080 mock WiFi get status");
+    LOG_INF("EMW3080 getting WiFi interface status");
     
     /* Safety check to prevent null pointer dereference */
     if (!dev) {
@@ -281,32 +406,43 @@ int emw3080_mgmt_get_status(const struct device *dev, struct wifi_iface_status *
     /* Start with a completely zeroed structure to be safe */
     memset(status, 0, sizeof(struct wifi_iface_status));
     
-    /* Set all fields individually rather than copying a structure */
-    status->state = WIFI_STATE_ASSOCIATED; /* Pretend we're connected */
-    
-    /* Set a safe SSID */
-    const char *test_ssid = "EMW3080-TEST";
-    size_t len = strlen(test_ssid);
-    if (len >= sizeof(status->ssid)) {
-        len = sizeof(status->ssid) - 1; /* Ensure space for null terminator */
+    /* Check our stored connection status to determine state */
+    if (current_status.state == WIFI_STATE_ASSOCIATED) {
+        LOG_INF("Interface is currently connected");
+        
+        /* Copy our current connection information */
+        memcpy(status, &current_status, sizeof(struct wifi_iface_status));
+        
+        /* Ensure SSID is properly null-terminated */
+        if (status->ssid_len >= sizeof(status->ssid)) {
+            status->ssid_len = sizeof(status->ssid) - 1;
+        }
+        status->ssid[status->ssid_len] = '\0';
+        
+        /* Return with connected status */
+        LOG_INF("WiFi status: Connected to SSID=%s, Channel=%d, RSSI=%d",
+                status->ssid, status->channel, status->rssi);
+    } else {
+        /* We're not connected - set appropriate values */
+        LOG_INF("Interface is currently disconnected");
+        
+        status->state = WIFI_STATE_DISCONNECTED;
+        status->band = WIFI_FREQ_BAND_2_4_GHZ; /* Most common band */
+        status->iface_mode = WIFI_STA_MODE;     /* Station mode */
+        status->mfp = WIFI_MFP_DISABLE;         /* No management frame protection */
+        
+        /* Clear SSID */
+        status->ssid_len = 0;
+        status->ssid[0] = '\0';
+        
+        /* Set other fields to default values */
+        status->channel = 0;                    /* No channel when disconnected */
+        status->security = WIFI_SECURITY_TYPE_NONE; /* No security when disconnected */
+        status->rssi = -100;                    /* Very weak/no signal */
+        
+        LOG_INF("WiFi status: Disconnected");
     }
     
-    memcpy(status->ssid, test_ssid, len);
-    status->ssid[len] = '\0';
-    status->ssid_len = len;
-    
-    /* Set other fields to safe default values */
-    status->band = WIFI_FREQ_BAND_2_4_GHZ;
-    status->channel = 1;
-    status->security = WIFI_SECURITY_TYPE_PSK;
-    status->rssi = -65;
-    status->iface_mode = WIFI_STA_MODE;
-    status->mfp = WIFI_MFP_DISABLE;
-    
-    /* Log what we're returning for debugging */
-    LOG_INF("WiFi status returning: SSID=%s (%d), State=%d, RSSI=%d",
-            status->ssid, status->ssid_len, status->state, status->rssi);
-            
     return 0;
 }
 

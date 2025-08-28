@@ -28,10 +28,10 @@ LOG_MODULE_REGISTER(emw3080, CONFIG_LOG_DEFAULT_LEVEL);
 #define EMW3080_CONNECT_TIMEOUT K_SECONDS(10)
 #define EMW3080_CMD_TIMEOUT K_SECONDS(2)
 
-/* AT command templates */
-static const char *const emw3080_cmd_scan = "AT+SCAN\r\n";
-static const char *const emw3080_cmd_connect = "AT+CWJAP=\"%s\",\"%s\"\r\n";
-static const char *const emw3080_cmd_disconnect = "AT+CWQAP\r\n";
+/* AT command templates (marked as maybe unused since we'll use them in the future) */
+static __maybe_unused const char *const emw3080_cmd_scan = "AT+SCAN\r\n";
+static __maybe_unused const char *const emw3080_cmd_connect = "AT+CWJAP=\"%s\",\"%s\"\r\n";
+static __maybe_unused const char *const emw3080_cmd_disconnect = "AT+CWQAP\r\n";
 
 struct emw3080_data {
     struct net_if *iface;
