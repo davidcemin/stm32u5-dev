@@ -133,9 +133,10 @@ static void emw3080_net_iface_init(struct net_if *iface)
     LOG_INF("EMW3080: Interface initialization started for iface %p (idx=%d)", 
            iface, net_if_get_by_iface(iface));
     
-    /* CRITICAL: Register the network offload API - this must be done before anything else */
+    /* CRITICAL: Register the network offload API using the proper Zephyr method */
     LOG_INF("EMW3080: Registering network offload API");
-    iface->if_dev->offload = &emw3080_offload;
+    /* Cast away const to set the offload API - this is how it's done in Zephyr examples */
+    ((struct net_if_dev *)iface->if_dev)->offload = &emw3080_offload;
     
     /* First step: Initialize our custom L2 implementation */
     LOG_INF("EMW3080: Initializing L2 layer");
