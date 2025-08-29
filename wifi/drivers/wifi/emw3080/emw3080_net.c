@@ -23,6 +23,7 @@ LOG_MODULE_REGISTER(emw3080_net, CONFIG_LOG_DEFAULT_LEVEL);
 #include "emw3080_offload_dev.h"
 #include "emw3080_mgmt.h"
 #include "emw3080_l2.h"
+#include "emw3080_offload.h"
 
 /* Include the L2 implementations we need */
 NET_L2_DECLARE_PUBLIC(OFFLOADED_NETDEV);
@@ -32,7 +33,6 @@ NET_L2_DECLARE_PUBLIC(EMW3080_L2);
 
 /* Forward declarations */
 extern int emw3080_init_with_spi(const struct device *dev, const struct device *spi_dev);
-extern const struct net_offload emw3080_offload;
 
 /* Forward declarations of internal functions - Must be at the top! */
 static void emw3080_net_iface_init(struct net_if *iface);
@@ -133,6 +133,10 @@ static void emw3080_net_iface_init(struct net_if *iface)
     LOG_INF("EMW3080: Interface initialization started for iface %p (idx=%d)", 
            iface, net_if_get_by_iface(iface));
     
+    /* CRITICAL: Register the network offload API - this must be done before anything else */
+    LOG_INF("EMW3080: Registering network offload API");
+    iface->if_dev->offload = &emw3080_offload;
+    
     /* First step: Initialize our custom L2 implementation */
     LOG_INF("EMW3080: Initializing L2 layer");
     emw3080_l2_init();
@@ -149,36 +153,21 @@ static void emw3080_net_iface_init(struct net_if *iface)
     LOG_INF("EMW3080: Initializing WiFi management functionality");
     emw3080_mgmt_init();
     
-    /* IMPORTANT: Set up interface properties - this is critical for DHCP to work */
-    LOG_INF("EMW3080: Setting up interface properties");
-    
     /* Set MAC address for the interface */
     LOG_INF("EMW3080: Setting MAC address: %02x:%02x:%02x:%02x:%02x:%02x", 
            data->mac_addr[0], data->mac_addr[1], data->mac_addr[2],
            data->mac_addr[3], data->mac_addr[4], data->mac_addr[5]);
     net_if_set_link_addr(iface, data->mac_addr, sizeof(data->mac_addr), NET_LINK_ETHERNET);
     
-    /* CRITICAL FIX: Check the L2 implementation and register our L2 functions */
+    /* Check the L2 implementation */
     const struct net_l2 *l2_interface = net_if_l2(iface);
-    LOG_INF("EMW3080: Current L2 interface: %p, EMW3080_L2: %p, OFFLOADED_NETDEV: %p",
-           l2_interface, &NET_L2_GET_NAME(EMW3080_L2), &NET_L2_GET_NAME(OFFLOADED_NETDEV));
+    LOG_INF("EMW3080: L2 interface: %p", l2_interface);
            
     if (l2_interface && l2_interface->send) {
         LOG_INF("EMW3080: L2 send function available: %p", l2_interface->send);
-        
-        /* Register our specific interface with the L2 implementation */
-        LOG_INF("EMW3080: Explicitly registering our interface with the L2 layer");
     } else {
-        LOG_WRN("EMW3080: Missing L2 send function! This will cause packet drops");
-        LOG_WRN("EMW3080: Will attempt direct handling via emw3080_attach_l2_to_iface()");
+        LOG_INF("EMW3080: No L2 send function - this is normal for offloaded devices");
     }
-    
-    /* Explicitly attach our L2 implementation to the interface */
-    LOG_INF("EMW3080: Attaching custom L2 implementation to interface");
-    emw3080_attach_l2_to_iface(iface);
-    
-    /* We'll rely on the L2 implementation directly rather than offload */
-    LOG_INF("EMW3080: Using L2 implementation directly");
     
     /* Set flags to enable sending/receiving */
     LOG_INF("EMW3080: Setting interface flags UP and RUNNING");
@@ -195,17 +184,21 @@ static void emw3080_net_iface_init(struct net_if *iface)
     
     LOG_INF("EMW3080: WiFi interface registered. WiFi=%d", is_wifi);
     
-    /* Double-check the L2 interface */
-    const struct net_l2 *final_l2 = net_if_l2(iface);
-    if (final_l2) {
-        LOG_INF("EMW3080: Final L2 implementation - recv: %p, send: %p", 
-               final_l2->recv, final_l2->send);
-        
-        if (final_l2->send == NULL) {
-            LOG_ERR("EMW3080: Final L2 has NULL send function! DHCP will fail!");
+    /* Check if the interface is offloaded and has proper API */
+    bool is_offloaded = net_if_is_offloaded(iface);
+    LOG_INF("EMW3080: Interface is offloaded: %d", is_offloaded);
+    
+    if (is_offloaded) {
+        /* Check offload API registration - this should be available now */
+        const struct net_offload *offload_api = net_if_offload(iface);
+        if (offload_api) {
+            LOG_INF("EMW3080: Offload API registered - send: %p, sendto: %p", 
+                   offload_api->send, offload_api->sendto);
+        } else {
+            LOG_ERR("EMW3080: No offload API registered despite being offloaded!");
         }
     } else {
-        LOG_ERR("EMW3080: No L2 interface attached after setup - this will cause packet drops!");
+        LOG_WRN("EMW3080: Interface is not marked as offloaded");
     }
     
     LOG_INF("EMW3080: Interface initialization complete");
@@ -251,8 +244,7 @@ static int emw3080_net_device_init(const struct device *dev)
  * 
  * The L2 layer will be registered during interface initialization in emw3080_net_iface_init.
  */
-/* Use our custom L2 implementation directly */
-/* Use the standard NET_DEVICE_INIT macro with our L2 API */
+/* Use the offload device registration since that's what works with our API */
 NET_DEVICE_OFFLOAD_INIT(emw3080_net,               /* Driver name */
                        "EMW3080_NET",              /* Device name */
                        emw3080_net_device_init,    /* Init function */

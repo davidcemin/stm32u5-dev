@@ -87,8 +87,6 @@ static int emw3080_get_free_socket(struct emw3080_data *data)
 /* This function is called when a packet needs to be sent */
 int emw3080_send_pkt(struct net_if *iface, struct net_pkt *pkt)
 {
-    const struct device *dev = net_if_get_device(iface);
-    
     LOG_INF("EMW3080 send packet: iface=%p, pkt=%p, len=%d", 
            iface, pkt, net_pkt_get_len(pkt));
     
@@ -112,137 +110,8 @@ int emw3080_send_pkt(struct net_if *iface, struct net_pkt *pkt)
     /* For now, let's just log and return success to avoid blocking */
     LOG_INF("Non-DHCP packet send via SPI - TODO: implement actual transmission");
     return net_pkt_get_len(pkt);
-    
-    /* Access IP header to get protocol info */
-    struct net_ipv4_hdr *ip_hdr;
-    uint8_t proto = 0;
-    uint16_t src_port = 0, dst_port = 0;
-    char dst_ip[NET_IPV4_ADDR_LEN] = {0};
-    
-    /* Get IP header */
-    net_pkt_cursor_init(pkt);
-    if (net_pkt_read(pkt, &ip_hdr, sizeof(struct net_ipv4_hdr)) < 0) {
-        LOG_ERR("Failed to read IP header");
-        return -EINVAL;
-    }
-    
-    /* Format destination IP */
-    ipv4_addr_to_str(ip_hdr->dst, dst_ip, sizeof(dst_ip));
-    
-    /* Check if this is a DHCP packet */
-    bool is_dhcp = is_dhcp_packet(pkt);
-    if (is_dhcp) {
-        LOG_INF("DHCP packet detected in send_pkt");
-    }
-    
-    proto = ip_hdr->proto;
-    
-    /* For TCP/UDP, get port information */
-    if (proto == IPPROTO_UDP || proto == IPPROTO_TCP) {
-        struct net_udp_hdr udp_hdr;
-        if (net_pkt_read(pkt, &udp_hdr, sizeof(struct net_udp_hdr)) < 0) {
-            LOG_ERR("Failed to read UDP/TCP header");
-            return -EINVAL;
-        }
-        src_port = ntohs(udp_hdr.src_port);
-        dst_port = ntohs(udp_hdr.dst_port);
-    }
-    
-    /* Get a socket for this connection */
-    int socket_idx = emw3080_get_free_socket(data);
-    if (socket_idx < 0) {
-        LOG_ERR("No free socket available");
-        return -ENOMEM;
-    }
-    
-    struct emw3080_socket *socket = &data->sockets[socket_idx];
-    socket->in_use = true;
-    socket->conn_id = socket_idx;
-    socket->remote_port = dst_port;
-    strncpy(socket->remote_ip, dst_ip, sizeof(socket->remote_ip) - 1);
-    
-    /* Reset cursor to beginning of packet */
-    net_pkt_cursor_init(pkt);
-    
-    /* Create connection based on protocol */
-    char cmd[64];
-    char resp[128];
-    int ret;
-    
-    if (proto == IPPROTO_TCP) {
-        snprintf(cmd, sizeof(cmd), EMW3080_CMD_START_TCP_WITH_ID, 
-                socket_idx, dst_ip, dst_port);
-    } else if (proto == IPPROTO_UDP) {
-        snprintf(cmd, sizeof(cmd), EMW3080_CMD_START_UDP_WITH_ID, 
-                socket_idx, dst_ip, dst_port);
-    } else {
-        LOG_ERR("Unsupported protocol: %d", proto);
-        socket->in_use = false;
-        return -EPROTONOSUPPORT;
-    }
-    
-    /* Send connection command */
-    ret = emw3080_send_at_cmd(data, cmd, strlen(cmd), resp, sizeof(resp), 5000);
-    if (ret < 0) {
-        LOG_ERR("Failed to establish connection: %d", ret);
-        socket->in_use = false;
-        return ret;
-    }
-    
-    /* Get packet data length */
-    uint16_t len = net_pkt_get_len(pkt);
-    
-    /* Prepare for data send */
-    snprintf(cmd, sizeof(cmd), emw3080_cmd_send_prepare, socket_idx, len);
-    ret = emw3080_send_at_cmd(data, cmd, strlen(cmd), resp, sizeof(resp), 1000);
-    if (ret < 0) {
-        LOG_ERR("Failed to prepare for data send: %d", ret);
-        socket->in_use = false;
-        return ret;
-    }
-    
-    /* Send actual data - here we need direct UART access */
-    k_mutex_lock(&data->spi_mutex, K_FOREVER);
-    
-    /* Reset buffer */
-    data->rx_buf.len = 0;
-    data->rx_buf.data_ready = false;
-    
-    /* Read packet data and send it through UART */
-    uint8_t *buffer = net_pkt_get_data(pkt, NULL);
-    if (!buffer) {
-        LOG_ERR("Failed to get packet data");
-        k_mutex_unlock(&data->spi_mutex);
-        socket->in_use = false;
-        return -ENOMEM;
-    }
-    
-    /* Send packet data */
-    for (uint16_t i = 0; i < len; i++) {
-        uart_poll_out(data->uart, buffer[i]);
-    }
-    
-    /* Wait for SEND OK response */
-    ret = k_sem_take(&data->rx_buf.sem, K_MSEC(5000));
-    if (ret == 0 && strstr((char *)data->rx_buf.data, "SEND OK")) {
-        ret = len;  /* Return sent data length */
-    } else {
-        LOG_ERR("Failed to send data or timeout");
-        ret = -EIO;
-    }
-    
-    k_mutex_unlock(&data->spi_mutex);
-    
-    /* For UDP, close the connection right away */
-    if (proto == IPPROTO_UDP) {
-        snprintf(cmd, sizeof(cmd), emw3080_cmd_close, socket_idx);
-        emw3080_send_at_cmd(data, cmd, strlen(cmd), NULL, 0, 1000);
-        socket->in_use = false;
-    }
-    
-    return ret;
 }
-
+    
 /* Process received data from AT command responses */
 void emw3080_process_ipd(struct emw3080_data *data, const uint8_t *ipd_data, uint16_t len)
 {
