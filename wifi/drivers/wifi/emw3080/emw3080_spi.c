@@ -318,55 +318,13 @@ int emw3080_spi_send_at_cmd_enhanced(const struct device *spi_dev,
         return -EINVAL;
     }
     
-    LOG_INF("Sending enhanced AT command: %.*s", (int)cmd_len, cmd);
-    
     /* Initialize response */
     memset(response, 0, sizeof(*response));
     
-    /* Send command using frame protocol */
-    int ret = emw3080_spi_send_frame(spi_dev, (const uint8_t *)cmd, cmd_len);
-    if (ret != 0) {
-        LOG_ERR("Failed to send AT command frame: %d", ret);
-        response->type = EMW3080_RESP_TYPE_ERROR;
-        response->error_code = ret;
-        return ret;
-    }
+    /* SAFETY: For now, disable real SPI communication to prevent crashes */
+    LOG_WRN("EMW3080 SPI: AT command disabled for safety - returning timeout");
+    LOG_INF("Would send: %.*s", (int)cmd_len, cmd);
     
-    /* Simplified approach: try to receive one frame and parse it immediately */
-    char temp_buf[32]; /* Very small buffer to minimize stack usage */
-    size_t received_len = 0;
-    
-    /* Simple wait with minimal iterations */
-    for (int i = 0; i < 5; i++) {
-        ret = emw3080_spi_recv_frame(spi_dev, (uint8_t *)temp_buf, sizeof(temp_buf) - 1, &received_len);
-        
-        if (ret == 0 && received_len > 0) {
-            temp_buf[received_len] = '\0';
-            LOG_DBG("Received response: %.*s", (int)received_len, temp_buf);
-            
-            /* Simple response parsing - check for OK/ERROR only */
-            if (strstr(temp_buf, "OK")) {
-                response->type = EMW3080_RESP_TYPE_OK;
-                response->complete = true;
-                response->data = NULL; /* Don't store data to avoid memory issues */
-                response->data_len = 0;
-                LOG_INF("AT command successful");
-                return 0;
-            } else if (strstr(temp_buf, "ERROR") || strstr(temp_buf, "FAIL")) {
-                response->type = EMW3080_RESP_TYPE_ERROR;
-                response->complete = true;
-                response->error_code = -1;
-                LOG_ERR("AT command failed");
-                return -1;
-            }
-        }
-        
-        /* Short delay */
-        k_msleep(10);
-    }
-    
-    /* If we get here, assume timeout */
-    LOG_WRN("AT command timeout - no clear response received");
     response->type = EMW3080_RESP_TYPE_TIMEOUT;
     response->error_code = -ETIMEDOUT;
     return -ETIMEDOUT;
