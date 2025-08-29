@@ -131,14 +131,38 @@ static int emw3080_l2_send(struct net_if *iface, struct net_pkt *pkt)
                         /* Test SPI communication by sending a simple AT command */
                         const struct device *spi_dev = DEVICE_DT_GET(DT_NODELABEL(spi2));
                         if (spi_dev && device_is_ready(spi_dev)) {
-                            LOG_INF("EMW3080 L2: Testing SPI communication with AT command");
-                            char response[64];
-                            int spi_ret = emw3080_spi_send_at_cmd(spi_dev, "AT\r\n", 4, 
-                                                                 response, sizeof(response), 1000);
+                            LOG_INF("EMW3080 L2: Testing enhanced SPI communication with AT command");
+                            
+                            struct emw3080_response response;
+                            int spi_ret = emw3080_spi_send_at_cmd_enhanced(spi_dev, "AT\r\n", 4, 
+                                                                         &response, 2000);
                             if (spi_ret == 0) {
-                                LOG_INF("EMW3080 L2: SPI AT command successful: %s", response);
+                                LOG_INF("EMW3080 L2: Enhanced SPI AT command result:");
+                                LOG_INF("  Type: %d", response.type);
+                                LOG_INF("  Complete: %s", response.complete ? "yes" : "no");
+                                LOG_INF("  Data length: %zu", response.data_len);
+                                
+                                if (response.data && response.data_len > 0) {
+                                    char preview[128];
+                                    size_t preview_len = response.data_len < sizeof(preview) - 1 ? 
+                                                       response.data_len : sizeof(preview) - 1;
+                                    memcpy(preview, response.data, preview_len);
+                                    preview[preview_len] = '\0';
+                                    LOG_INF("  Response: %s", preview);
+                                }
+                                
+                                /* Check response type */
+                                if (response.type == EMW3080_RESP_TYPE_OK) {
+                                    LOG_INF("EMW3080 L2: ✓ AT command successful (OK response)");
+                                } else if (response.type == EMW3080_RESP_TYPE_ERROR) {
+                                    LOG_INF("EMW3080 L2: ✗ AT command failed (ERROR response)");
+                                } else if (response.type == EMW3080_RESP_TYPE_TIMEOUT) {
+                                    LOG_INF("EMW3080 L2: ⏱ AT command timed out");
+                                } else {
+                                    LOG_INF("EMW3080 L2: ? AT command returned type %d", response.type);
+                                }
                             } else {
-                                LOG_INF("EMW3080 L2: SPI AT command test returned: %d", spi_ret);
+                                LOG_INF("EMW3080 L2: Enhanced SPI AT command failed: %d", spi_ret);
                             }
                         } else {
                             LOG_WRN("EMW3080 L2: SPI device not ready for testing");
