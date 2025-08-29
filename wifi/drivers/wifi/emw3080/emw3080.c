@@ -317,8 +317,8 @@ static const struct wifi_mgmt_ops emw3080_mgmt_ops = {
     static struct emw3080_data emw3080_data_##inst = {                          \
         .reset_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, reset_gpios, {0}),         \
         .power_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, power_gpios, {0}),         \
-        /* Try to get the UART device from the device tree */                   \
-        .uart = DEVICE_DT_GET(DT_INST_BUS(inst)),                               \
+        /* Get the SPI device from the device tree */                           \
+        .spi = DEVICE_DT_GET(DT_INST_BUS(inst)),                                \
     };                                                                          \
                                                                                \
     DEVICE_DT_INST_DEFINE(inst,                                                 \
@@ -416,36 +416,28 @@ int emw3080_delayed_init(void)
         }
     }
     
-    /* Configure UART */
-    if (data->uart && device_is_ready(data->uart)) {
-        LOG_INF("Configuring UART: %s", data->uart->name);
+    /* SPI-based initialization - no UART needed */
+    if (data->spi && device_is_ready(data->spi)) {
+        LOG_INF("SPI device ready: %s", data->spi->name);
         
-        /* Configure the UART with proper settings */
-        struct uart_config uart_cfg = {
-            .baudrate = 115200,
-            .parity = UART_CFG_PARITY_NONE,
-            .stop_bits = UART_CFG_STOP_BITS_1,
-            .data_bits = UART_CFG_DATA_BITS_8,
-            .flow_ctrl = UART_CFG_FLOW_CTRL_NONE
-        };
-        
-        /* Apply configuration */
-        int ret = uart_configure(data->uart, &uart_cfg);
-        if (ret != 0) {
-            LOG_ERR("Failed to configure UART: %d", ret);
+        /* Hardware reset sequence */
+        if (device_is_ready(data->reset_gpio.port)) {
+            gpio_pin_configure_dt(&data->reset_gpio, GPIO_OUTPUT_ACTIVE);
+            k_msleep(10);
+            gpio_pin_configure_dt(&data->reset_gpio, GPIO_OUTPUT_INACTIVE);
+            k_msleep(100);
+            LOG_INF("EMW3080 hardware reset completed");
         }
         
-        /* Ensure all interrupts are disabled */
-        uart_irq_rx_disable(data->uart);
-        uart_irq_tx_disable(data->uart);
-        
-        /* Clear any pending data */
-        uint8_t c;
-        while (uart_poll_in(data->uart, &c) == 0) {
-            /* Discard the character */
+        /* Power control */
+        if (device_is_ready(data->power_gpio.port)) {
+            gpio_pin_configure_dt(&data->power_gpio, GPIO_OUTPUT_ACTIVE);
+            k_msleep(50);
+            LOG_INF("EMW3080 power enabled");
         }
+        
     } else {
-        LOG_ERR("UART device not ready");
+        LOG_ERR("SPI device not ready");
         return -ENODEV;
     }
     

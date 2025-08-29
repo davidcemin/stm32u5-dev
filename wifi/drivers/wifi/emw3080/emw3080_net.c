@@ -133,7 +133,7 @@ static void emw3080_net_iface_init(struct net_if *iface)
     struct emw3080_net_data *data = dev->data;
     
     /* MAKE SURE THIS APPEARS IN LOGS */
-    printk("!!! EMW3080_NET_IFACE_INIT CALLED !!! Interface: %p\n", iface);
+    LOG_DBG("EMW3080_NET_IFACE_INIT CALLED - Interface: %p", iface);
     LOG_ERR("!!! EMW3080_NET_IFACE_INIT CALLED !!! Interface: %p", iface);
     
     LOG_INF("EMW3080: Interface initialization started for iface %p (idx=%d)", 

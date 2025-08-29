@@ -61,14 +61,6 @@
 #define EMW3080_SPI_WRITE           (0x0A)
 #define EMW3080_SPI_READ            (0x0B)
 
-/* SPI packet header structure */
-struct emw3080_spi_header {
-    uint8_t type;      /* SPI_WRITE or SPI_READ */
-    uint16_t len;      /* Length of data */
-    uint16_t lenx;     /* Length check */
-    uint8_t dummy[3];  /* Padding */
-} __packed;
-
 /* MIPC packet structure */
 struct emw3080_mipc_packet {
     uint32_t req_id;   /* Request ID */
