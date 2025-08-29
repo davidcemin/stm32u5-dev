@@ -8,9 +8,11 @@
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/ethernet.h>
 #include <zephyr/net/offloaded_netdev.h>
+#include <zephyr/net/net_l2.h>
 #include <zephyr/net/socket.h>
 #include <zephyr/net/dns_resolve.h>
 #include <zephyr/net/dhcpv4.h>
+#include <zephyr/net/net_offload.h>
 #include <string.h>
 #include <stdio.h>
 #include <zephyr/logging/log.h>
@@ -18,6 +20,7 @@
 #include <zephyr/version.h>
 #include "../drivers/wifi/emw3080/emw3080_debug.h"
 #include "../drivers/wifi/emw3080/emw3080_test.h"
+#include "../drivers/wifi/emw3080/emw3080_offload.h"
 
 /* Forward declaration for function to get network device */
 extern const struct device *get_emw3080_net_device(void);
@@ -155,6 +158,42 @@ static struct net_if *get_wifi_iface(void)
             const struct device *dev = net_if_get_device(iface);
             if (dev == emw3080_net) {
                 LOG_INF("Found EMW3080 network interface");
+                
+                /* MANUALLY REGISTER OFFLOAD API - Since automatic isn't working */
+                LOG_ERR("MANUAL OFFLOAD REGISTRATION: Registering offload API for interface %p", iface);
+                
+                /* Cast away const to set the offload API */
+                struct net_if_dev *if_dev = (struct net_if_dev *)iface->if_dev;
+                if_dev->offload = &emw3080_offload;
+                
+                /* Check if registration worked */
+                bool is_offloaded = net_if_is_offloaded(iface);
+                LOG_ERR("MANUAL OFFLOAD REGISTRATION: Interface is_offloaded: %d", is_offloaded);
+                
+                if (is_offloaded) {
+                    const struct net_offload *offload_api = net_if_offload(iface);
+                    if (offload_api) {
+                        LOG_ERR("MANUAL OFFLOAD REGISTRATION: SUCCESS! API registered - send: %p", offload_api->send);
+                    } else {
+                        LOG_ERR("MANUAL OFFLOAD REGISTRATION: FAILED - No API despite being offloaded");
+                    }
+                } else {
+                    LOG_ERR("MANUAL OFFLOAD REGISTRATION: FAILED - Interface not marked as offloaded");
+                }
+                
+                /* Check what L2 layer is assigned */
+                const struct net_l2 *l2_layer = net_if_l2(iface);
+                LOG_ERR("MANUAL OFFLOAD REGISTRATION: Current L2 layer: %p", l2_layer);
+                if (l2_layer) {
+                    LOG_ERR("MANUAL OFFLOAD REGISTRATION: L2 send function: %p", l2_layer->send);
+                }
+                
+                /* Double-check in a few milliseconds to ensure it persists */
+                k_msleep(100);
+                
+                bool still_offloaded = net_if_is_offloaded(iface);
+                LOG_ERR("MANUAL OFFLOAD REGISTRATION: After 100ms, still_offloaded: %d", still_offloaded);
+                
                 return iface;
             }
         }

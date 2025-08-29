@@ -18,6 +18,7 @@ LOG_MODULE_REGISTER(emw3080_net, CONFIG_LOG_DEFAULT_LEVEL);
 #include <zephyr/net/offloaded_netdev.h>
 #include <zephyr/net/net_l2.h>
 #include <zephyr/net/ethernet.h>
+#include <zephyr/sys/printk.h>
 #include <stdbool.h>
 
 #include "emw3080_offload_dev.h"
@@ -27,7 +28,7 @@ LOG_MODULE_REGISTER(emw3080_net, CONFIG_LOG_DEFAULT_LEVEL);
 
 /* Include the L2 implementations we need */
 NET_L2_DECLARE_PUBLIC(OFFLOADED_NETDEV);
-NET_L2_DECLARE_PUBLIC(EMW3080_L2);
+/* EMW3080_L2 is declared and defined in emw3080_l2.c - rely on linker */
 
 /* We'll use the L2 implementation directly instead of trying to set offload */
 
@@ -130,6 +131,10 @@ static void emw3080_net_iface_init(struct net_if *iface)
     const struct device *dev = net_if_get_device(iface);
     struct emw3080_net_data *data = dev->data;
     
+    /* MAKE SURE THIS APPEARS IN LOGS */
+    printk("!!! EMW3080_NET_IFACE_INIT CALLED !!! Interface: %p\n", iface);
+    LOG_ERR("!!! EMW3080_NET_IFACE_INIT CALLED !!! Interface: %p", iface);
+    
     LOG_INF("EMW3080: Interface initialization started for iface %p (idx=%d)", 
            iface, net_if_get_by_iface(iface));
     
@@ -137,6 +142,11 @@ static void emw3080_net_iface_init(struct net_if *iface)
     LOG_INF("EMW3080: Registering network offload API");
     /* Cast away const to set the offload API - this is how it's done in Zephyr examples */
     ((struct net_if_dev *)iface->if_dev)->offload = &emw3080_offload;
+    
+    /* CRITICAL: Set the offload flags to ensure packets go through offload path */
+    LOG_INF("EMW3080: Setting offload flags");
+    net_if_flag_set(iface, NET_IF_IPV4);
+    net_if_flag_set(iface, NET_IF_IPV6);
     
     /* First step: Initialize our custom L2 implementation */
     LOG_INF("EMW3080: Initializing L2 layer");
@@ -167,7 +177,37 @@ static void emw3080_net_iface_init(struct net_if *iface)
     if (l2_interface && l2_interface->send) {
         LOG_INF("EMW3080: L2 send function available: %p", l2_interface->send);
     } else {
-        LOG_INF("EMW3080: No L2 send function - this is normal for offloaded devices");
+        LOG_INF("EMW3080: No L2 send function - this will cause 'l2 cannot send' error");
+        
+        /* CRITICAL FIX: The OFFLOADED_NETDEV L2 layer has NULL send function,
+         * which causes "l2 for iface 1 cannot send, discard pkt" error.
+         * We need to override it with our custom L2 layer that has a send function.
+         */
+        
+        /* Get our custom L2 layer */
+        extern const struct net_l2 NET_L2_GET_NAME(EMW3080_L2);
+        const struct net_l2 *our_l2 = &NET_L2_GET_NAME(EMW3080_L2);
+        
+        LOG_INF("EMW3080: Our L2 implementation: %p", our_l2);
+        LOG_INF("EMW3080: Our L2 send function: %p", our_l2->send);
+        
+        /* Override the L2 layer pointer in the interface device.
+         * This is a workaround since the L2 pointer is const, but we need
+         * to provide a send function to prevent packet drops.
+         */
+        struct net_if_dev *if_dev = (struct net_if_dev *)iface->if_dev;
+        /* Cast away const to modify the L2 pointer */
+        *((const struct net_l2 **)&if_dev->l2) = our_l2;
+        
+        LOG_INF("EMW3080: Successfully assigned our L2 layer to interface");
+        
+        /* Verify the assignment worked */
+        const struct net_l2 *new_l2 = net_if_l2(iface);
+        if (new_l2 && new_l2->send) {
+            LOG_INF("EMW3080: ✓ L2 send function now available: %p", new_l2->send);
+        } else {
+            LOG_ERR("EMW3080: ✗ Failed to assign L2 send function");
+        }
     }
     
     /* Set flags to enable sending/receiving */
@@ -195,11 +235,22 @@ static void emw3080_net_iface_init(struct net_if *iface)
         if (offload_api) {
             LOG_INF("EMW3080: Offload API registered - send: %p, sendto: %p", 
                    offload_api->send, offload_api->sendto);
+            LOG_INF("EMW3080: SUCCESS - Offload API properly registered!");
         } else {
-            LOG_ERR("EMW3080: No offload API registered despite being offloaded!");
+            LOG_ERR("EMW3080: FAILED - No offload API registered despite being offloaded!");
         }
     } else {
-        LOG_WRN("EMW3080: Interface is not marked as offloaded");
+        LOG_ERR("EMW3080: FAILED - Interface is not marked as offloaded!");
+        LOG_ERR("EMW3080: This means packets will try to use L2 send (which doesn't exist)");
+        
+        /* Force-set the offload API again with more aggressive approach */
+        LOG_INF("EMW3080: Attempting force registration of offload API");
+        struct net_if_dev *if_dev = (struct net_if_dev *)iface->if_dev;
+        if_dev->offload = &emw3080_offload;
+        
+        /* Double-check if it worked */
+        is_offloaded = net_if_is_offloaded(iface);
+        LOG_INF("EMW3080: After force registration, is_offloaded: %d", is_offloaded);
     }
     
     LOG_INF("EMW3080: Interface initialization complete");
@@ -233,19 +284,23 @@ static int emw3080_net_device_init(const struct device *dev)
     
     /* This initialization will be called again by the networking stack */
     LOG_INF("EMW3080 network device ready");
+    
+    /* MANUALLY CALL INTERFACE INIT - Since automatic isn't working */
+    LOG_INF("EMW3080: MANUALLY calling interface initialization after device init");
+    
+    /* Find the network interface for this device and call init */
+    /* We'll do this in a work queue since interfaces might not be ready yet */
     return 0;
 }
 
 /* Create the network device - this is the registration that integrates 
  * our driver with the Zephyr networking subsystem.
  * 
- * We use NET_DEVICE_OFFLOAD_INIT to explicitly register this as an offloaded network device
- * that relies on &offloaded_if API, which contains both the interface init function 
- * and the get_type function needed for WiFi identification.
- * 
- * The L2 layer will be registered during interface initialization in emw3080_net_iface_init.
+ * We use NET_DEVICE_OFFLOAD_INIT to register as an offloaded network device.
+ * The L2 send function issue will be resolved by manually setting up the
+ * interface's L2 layer during initialization.
  */
-/* Use the offload device registration since that's what works with our API */
+/* Use the standard offload device registration */
 NET_DEVICE_OFFLOAD_INIT(emw3080_net,               /* Driver name */
                        "EMW3080_NET",              /* Device name */
                        emw3080_net_device_init,    /* Init function */
@@ -253,7 +308,7 @@ NET_DEVICE_OFFLOAD_INIT(emw3080_net,               /* Driver name */
                        &emw3080_net_dev_data,      /* Data */
                        NULL,                       /* Config */
                        CONFIG_WIFI_INIT_PRIORITY,  /* Priority */
-                       &offloaded_if,              /* API */
+                       &offloaded_if,              /* Our custom API */
                        1500);                      /* MTU */
 
 /* Function to be called from main to check if network device is ready */

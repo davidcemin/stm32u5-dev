@@ -28,6 +28,11 @@ NET_L2_DECLARE_PUBLIC(OFFLOADED_NETDEV);
 /* Ethernet L2 compatible send function that can be called directly by L2 */
 int emw3080_offload_send_pkt(struct net_if *iface, struct net_pkt *pkt)
 {
+    LOG_ERR("=== EMW3080_OFFLOAD_SEND_PKT CALLED! === iface=%p, pkt=%p, len=%d", 
+           iface, pkt, net_pkt_get_len(pkt));
+    printk("!!! EMW3080_OFFLOAD_SEND_PKT CALLED !!! iface=%p, pkt=%p, len=%d\n", 
+           iface, pkt, net_pkt_get_len(pkt));
+    
     LOG_INF("EMW3080 offload_send_pkt called: iface=%p (idx=%d), pkt=%p, len=%d", 
            iface, net_if_get_by_iface(iface), pkt, net_pkt_get_len(pkt));
            
@@ -192,6 +197,11 @@ static int emw3080_send(struct net_pkt *pkt,
                        int32_t timeout,
                        void *user_data)
 {
+    LOG_ERR("=== EMW3080_SEND CALLED! === Packet: %p, size: %d bytes", 
+           pkt, net_pkt_get_len(pkt));
+    printk("!!! EMW3080_SEND CALLED !!! Packet: %p, size: %d\n", 
+           pkt, net_pkt_get_len(pkt));
+    
     LOG_INF("EMW3080 net_offload send operation - packet size: %d bytes", 
            net_pkt_get_len(pkt));
     
@@ -241,6 +251,11 @@ static int emw3080_sendto(struct net_pkt *pkt,
                          int32_t timeout,
                          void *user_data)
 {
+    LOG_ERR("=== EMW3080_SENDTO CALLED! === Packet: %p, size: %d bytes", 
+           pkt, net_pkt_get_len(pkt));
+    printk("!!! EMW3080_SENDTO CALLED !!! Packet: %p, size: %d\n", 
+           pkt, net_pkt_get_len(pkt));
+    
     LOG_INF("EMW3080 net_offload sendto operation - packet size: %d bytes", 
            net_pkt_get_len(pkt));
     
