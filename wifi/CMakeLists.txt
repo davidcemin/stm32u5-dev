@@ -21,6 +21,7 @@ target_sources(app PRIVATE
     src/wifi_shell.c
     # SPI-based drivers - now active
     drivers/wifi/emw3080/emw3080_spi.c
+    drivers/wifi/emw3080/emw3080_ipc.c
     drivers/wifi/emw3080/emw3080_net.c
     drivers/wifi/emw3080/emw3080_offload.c
     drivers/wifi/emw3080/emw3080_mgmt.c

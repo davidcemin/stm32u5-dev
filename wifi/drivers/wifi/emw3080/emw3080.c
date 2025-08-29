@@ -29,6 +29,7 @@ LOG_MODULE_REGISTER(emw3080, CONFIG_LOG_DEFAULT_LEVEL);
 #include "emw3080_socket.h" /* Include the socket header for process_ipd function */
 #include "emw3080_uart.h" /* Include the UART header for UART functions */
 #include "emw3080_hw.h" /* Include the hardware header for HW functions */
+#include "emw3080_ipc.h" /* Include the IPC header for binary protocol functions */
 
 /* EMW3080 specific defines */
 #define EMW3080_MAX_DATA_SIZE 2048
@@ -137,6 +138,46 @@ static int emw3080_init(const struct device *dev)
         int ret = emw3080_spi_init(data->spi);
         if (ret == 0) {
             LOG_INF("SPI communication initialized successfully");
+            
+            /* Initialize binary IPC protocol */
+            ret = emw3080_ipc_init(dev);
+            if (ret == 0) {
+                LOG_INF("EMW3080 IPC protocol initialized successfully");
+                
+                /* Get firmware version */
+                char version[64];
+                ret = emw3080_ipc_get_version(dev, version, sizeof(version));
+                if (ret == 0) {
+                    LOG_INF("EMW3080 firmware version: %s", version);
+                }
+                
+                /* Get MAC address and set it properly */
+                uint8_t mac[6];
+                ret = emw3080_ipc_get_mac(dev, mac);
+                if (ret == 0) {
+                    LOG_INF("EMW3080 MAC address: %02x:%02x:%02x:%02x:%02x:%02x",
+                            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+                    /* Store MAC address in data structure */
+                    memcpy(data->mac_addr, mac, 6);
+                } else {
+                    LOG_WRN("Failed to get MAC address, using default");
+                    /* Use default MAC address */
+                    uint8_t default_mac[6] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 };
+                    memcpy(data->mac_addr, default_mac, 6);
+                }
+                
+                /* Enable network bypass mode for Zephyr integration */
+                ret = emw3080_ipc_set_bypass_mode(dev, true);
+                if (ret == 0) {
+                    LOG_INF("EMW3080 network bypass mode enabled");
+                } else {
+                    LOG_WRN("Failed to enable bypass mode: %d", ret);
+                }
+                
+            } else {
+                LOG_ERR("IPC protocol initialization failed: %d", ret);
+                return ret;
+            }
         } else {
             LOG_WRN("SPI communication init failed: %d", ret);
         }

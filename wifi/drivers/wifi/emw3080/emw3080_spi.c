@@ -321,10 +321,90 @@ int emw3080_spi_send_at_cmd_enhanced(const struct device *spi_dev,
     /* Initialize response */
     memset(response, 0, sizeof(*response));
     
-    /* SAFETY: For now, disable real SPI communication to prevent crashes */
-    LOG_WRN("EMW3080 SPI: AT command disabled for safety - returning timeout");
-    LOG_INF("Would send: %.*s", (int)cmd_len, cmd);
+    /* MINIMAL SAFE IMPLEMENTATION: Only allow scan command for now */
+    if (strstr(cmd, "AT+CWLAP") == NULL) {
+        LOG_WRN("EMW3080 SPI: Only scan commands allowed for safety");
+        LOG_INF("Blocked command: %.*s", (int)cmd_len, cmd);
+        response->type = EMW3080_RESP_TYPE_TIMEOUT;
+        response->error_code = -ETIMEDOUT;
+        return -ETIMEDOUT;
+    }
     
+    LOG_INF("EMW3080 SPI: Attempting REAL scan command: %.*s", (int)cmd_len, cmd);
+    
+    /* Use basic SPI transceive - simplified approach */
+    static uint8_t tx_buffer[32];
+    static uint8_t rx_buffer[256];
+    
+    /* Copy command to local buffer */
+    if (cmd_len > sizeof(tx_buffer) - 1) {
+        LOG_ERR("EMW3080 SPI: Command too long: %zu", cmd_len);
+        response->type = EMW3080_RESP_TYPE_ERROR;
+        response->error_code = -EINVAL;
+        return -EINVAL;
+    }
+    
+    memset(tx_buffer, 0, sizeof(tx_buffer));
+    memset(rx_buffer, 0, sizeof(rx_buffer));
+    memcpy(tx_buffer, cmd, cmd_len);
+    
+    /* Send command and receive response in one operation */
+    int ret = emw3080_spi_transceive(spi_dev, tx_buffer, cmd_len, 
+                                    rx_buffer, sizeof(rx_buffer));
+    if (ret != 0) {
+        LOG_ERR("EMW3080 SPI: Transceive failed: %d", ret);
+        response->type = EMW3080_RESP_TYPE_ERROR;
+        response->error_code = ret;
+        return ret;
+    }
+    
+    /* Log what we received */
+    LOG_INF("EMW3080 SPI: Raw response (first 32 bytes):");
+    for (int i = 0; i < 32 && i < sizeof(rx_buffer); i += 8) {
+        LOG_INF("  %02x %02x %02x %02x %02x %02x %02x %02x",
+                rx_buffer[i], rx_buffer[i+1], rx_buffer[i+2], rx_buffer[i+3],
+                rx_buffer[i+4], rx_buffer[i+5], rx_buffer[i+6], rx_buffer[i+7]);
+    }
+    
+    /* Try to find meaningful data */
+    size_t meaningful_len = 0;
+    for (size_t i = 0; i < sizeof(rx_buffer); i++) {
+        if (rx_buffer[i] >= 0x20 && rx_buffer[i] <= 0x7E) {  /* Printable ASCII */
+            meaningful_len = i + 1;
+        }
+    }
+    
+    if (meaningful_len > 0) {
+        LOG_INF("EMW3080 SPI: Found %zu bytes of meaningful data", meaningful_len);
+        
+        /* Convert to string and check content */
+        static char response_str[256];
+        memset(response_str, 0, sizeof(response_str));
+        size_t copy_len = MIN(meaningful_len, sizeof(response_str) - 1);
+        memcpy(response_str, rx_buffer, copy_len);
+        response_str[copy_len] = '\0';
+        
+        LOG_INF("EMW3080 SPI: Response string: '%s'", response_str);
+        
+        /* Check for success indicators */
+        if (strstr(response_str, "OK") || strstr(response_str, "+CWLAP:")) {
+            response->type = EMW3080_RESP_TYPE_OK;
+            response->complete = true;
+            response->data = response_str;
+            response->data_len = copy_len;
+            LOG_INF("EMW3080 SPI: Scan completed successfully!");
+            return 0;
+        } else if (strstr(response_str, "ERROR")) {
+            response->type = EMW3080_RESP_TYPE_ERROR;
+            response->complete = true;
+            response->error_code = -1;
+            LOG_ERR("EMW3080 SPI: Device returned ERROR");
+            return -1;
+        }
+    }
+    
+    /* If we get here, no meaningful response */
+    LOG_WRN("EMW3080 SPI: No meaningful response from device");
     response->type = EMW3080_RESP_TYPE_TIMEOUT;
     response->error_code = -ETIMEDOUT;
     return -ETIMEDOUT;

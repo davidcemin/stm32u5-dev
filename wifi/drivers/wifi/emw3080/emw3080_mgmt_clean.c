@@ -6,6 +6,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/logging/log.h>
@@ -16,53 +17,9 @@
 
 LOG_MODULE_REGISTER(emw3080_mgmt, CONFIG_WIFI_LOG_LEVEL);
 
-/* IPC stub implementations - placed here to avoid linker garbage collection */
-int emw3080_ipc_init(const struct device *dev) {
-    LOG_INF("IPC init stub called");
-    return 0;
-}
-
-int emw3080_ipc_scan(const struct device *dev, enum emw3080_scan_mode mode, const char *ssid) {
-    LOG_INF("IPC scan stub called: mode=%d, ssid=%s", mode, ssid ? ssid : "(null)");
-    return 0;
-}
-
-int emw3080_ipc_connect(const struct device *dev, const struct emw3080_connect_params *params) {
-    LOG_INF("IPC connect stub called: ssid=%s", params ? (const char *)params->ssid : "(null)");
-    return 0;
-}
-
-int emw3080_ipc_disconnect(const struct device *dev) {
-    LOG_INF("IPC disconnect stub called");  
-    return 0;
-}
-
-/* Define missing WiFi constants */
-#ifndef WIFI_LINK_MODE_STATION
-#define WIFI_LINK_MODE_STATION 1
-#endif
-
-#ifndef WIFI_LINK_MODE_UNKNOWN
-#define WIFI_LINK_MODE_UNKNOWN 0
-#endif
-
-#ifndef WIFI_MODE_INFRA
-#define WIFI_MODE_INFRA 2
-#endif
-
-#ifndef WIFI_MODE_UNKNOWN
-#define WIFI_MODE_UNKNOWN 0
-#endif
-
 /* Current WiFi status */
-static struct wifi_iface_status current_status;
+static struct wifi_status current_status;
 static struct wifi_connect_req_params current_connection;
-static struct net_if *mgmt_iface = NULL;
-
-/* Scan results storage */
-static struct wifi_scan_result scan_results[10];
-static int scan_result_count = 0;
-static bool scan_completed = false;
 
 int emw3080_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
                      scan_result_cb_t cb)
@@ -71,26 +28,12 @@ int emw3080_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
     
     LOG_INF("EMW3080: Initiating WiFi scan using binary IPC");
     
-    /* Convert Zephyr scan params to EMW3080 IPC format */
-    enum emw3080_scan_mode mode = EMW3080_SCAN_ACTIVE;
-    const char *ssid = NULL;
-    
-    if (params && params->ssids[0]) {
-        ssid = params->ssids[0];  /* Use first SSID if provided */
-    }
-    
     /* Call the real IPC scan function */
-    ret = emw3080_ipc_scan(dev, mode, ssid);
+    ret = emw3080_ipc_scan(dev, params, cb);
     if (ret != 0) {
         LOG_ERR("EMW3080: WiFi scan failed: %d", ret);
         return ret;
     }
-    
-    /* For now, return success. In a full implementation, we would:
-     * 1. Wait for scan completion event
-     * 2. Get scan results using emw3080_ipc_get_scan_results
-     * 3. Convert results to Zephyr format and call cb for each
-     */
     
     LOG_INF("EMW3080: WiFi scan completed successfully");
     return 0;
@@ -100,7 +43,6 @@ int emw3080_mgmt_connect(const struct device *dev,
                         struct wifi_connect_req_params *params)
 {
     int ret;
-    struct emw3080_connect_params ipc_params;
     
     if (!params || !params->ssid) {
         LOG_ERR("EMW3080: Invalid connection parameters");
@@ -112,19 +54,8 @@ int emw3080_mgmt_connect(const struct device *dev,
     /* Store connection parameters */
     memcpy(&current_connection, params, sizeof(current_connection));
     
-    /* Convert Zephyr params to EMW3080 IPC format */
-    memset(&ipc_params, 0, sizeof(ipc_params));
-    strncpy(ipc_params.ssid, params->ssid, sizeof(ipc_params.ssid) - 1);
-    
-    if (params->psk) {
-        strncpy(ipc_params.password, params->psk, sizeof(ipc_params.password) - 1);
-        ipc_params.security = EMW3080_SEC_WPA2_AES;
-    } else {
-        ipc_params.security = EMW3080_SEC_NONE;
-    }
-    
     /* Call the real IPC connect function */
-    ret = emw3080_ipc_connect(dev, &ipc_params);
+    ret = emw3080_ipc_connect(dev, params);
     if (ret != 0) {
         LOG_ERR("EMW3080: WiFi connection failed: %d", ret);
         return ret;
@@ -201,37 +132,7 @@ int emw3080_mgmt_iface_status(const struct device *dev, struct wifi_iface_status
     return emw3080_mgmt_status(dev, status);
 }
 
-bool emw3080_mgmt_scan_results_ready(void)
-{
-    return scan_completed;
-}
-
-int emw3080_mgmt_get_scan_results(struct wifi_scan_result *results, int max_results, int *count)
-{
-    if (!results || !count) {
-        return -EINVAL;
-    }
-    
-    int copy_count = MIN(scan_result_count, max_results);
-    memcpy(results, scan_results, copy_count * sizeof(struct wifi_scan_result));
-    *count = copy_count;
-    
-    LOG_DBG("EMW3080: Returning %d scan results", copy_count);
-    return 0;
-}
-
-int emw3080_mgmt_get_status(const struct device *dev, struct wifi_iface_status *status)
-{
-    return emw3080_mgmt_status(dev, status);
-}
-
-void emw3080_mgmt_set_iface(struct net_if *net_iface)
-{
-    mgmt_iface = net_iface;
-    LOG_DBG("EMW3080: Management interface set");
-}
-
-void emw3080_mgmt_init(void)
+int emw3080_mgmt_init(const struct device *dev)
 {
     LOG_INF("EMW3080: Management layer initialized");
     
@@ -242,7 +143,5 @@ void emw3080_mgmt_init(void)
     current_status.band = WIFI_FREQ_BAND_UNKNOWN;
     current_status.iface_mode = WIFI_MODE_UNKNOWN;
     
-    /* Initialize scan results */
-    scan_result_count = 0;
-    scan_completed = false;
+    return 0;
 }

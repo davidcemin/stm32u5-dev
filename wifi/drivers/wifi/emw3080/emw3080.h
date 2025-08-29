@@ -61,6 +61,9 @@ struct emw3080_data {
     struct k_work request_work;
     struct k_mutex spi_mutex;
     
+    /* MAC address */
+    uint8_t mac_addr[6];
+    
     /* Connection state */
     bool connected;
     char ssid[WIFI_SSID_MAX_LEN + 1];

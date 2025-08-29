@@ -25,6 +25,7 @@ LOG_MODULE_REGISTER(emw3080_net, CONFIG_LOG_DEFAULT_LEVEL);
 #include "emw3080_mgmt.h"
 #include "emw3080_l2.h"
 #include "emw3080_offload.h"
+#include "emw3080_ipc.h"
 
 /* Include the L2 implementations we need */
 NET_L2_DECLARE_PUBLIC(OFFLOADED_NETDEV);

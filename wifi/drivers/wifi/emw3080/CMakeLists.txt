@@ -9,6 +9,7 @@ zephyr_library()
 zephyr_library_sources(
     emw3080.c
     emw3080_spi.c
+    emw3080_ipc.c
     emw3080_offload.c
     emw3080_debug.c
     emw3080_shell.c
