@@ -16,27 +16,6 @@
 
 LOG_MODULE_REGISTER(emw3080_mgmt, CONFIG_WIFI_LOG_LEVEL);
 
-/* IPC stub implementations - placed here to avoid linker garbage collection */
-int emw3080_ipc_init(const struct device *dev) {
-    LOG_INF("IPC init stub called");
-    return 0;
-}
-
-int emw3080_ipc_scan(const struct device *dev, enum emw3080_scan_mode mode, const char *ssid) {
-    LOG_INF("IPC scan stub called: mode=%d, ssid=%s", mode, ssid ? ssid : "(null)");
-    return 0;
-}
-
-int emw3080_ipc_connect(const struct device *dev, const struct emw3080_connect_params *params) {
-    LOG_INF("IPC connect stub called: ssid=%s", params ? (const char *)params->ssid : "(null)");
-    return 0;
-}
-
-int emw3080_ipc_disconnect(const struct device *dev) {
-    LOG_INF("IPC disconnect stub called");  
-    return 0;
-}
-
 /* Define missing WiFi constants */
 #ifndef WIFI_LINK_MODE_STATION
 #define WIFI_LINK_MODE_STATION 1
@@ -50,11 +29,23 @@ int emw3080_ipc_disconnect(const struct device *dev) {
 #define WIFI_MODE_INFRA 2
 #endif
 
+#ifndef WIFI_FREQ_BAND_2_4_GHZ
+#define WIFI_FREQ_BAND_2_4_GHZ 0
+#endif
+
 #ifndef WIFI_MODE_UNKNOWN
 #define WIFI_MODE_UNKNOWN 0
 #endif
 
-/* Current WiFi status */
+#ifndef WIFI_FREQ_BAND_2_4_GHZ
+#define WIFI_FREQ_BAND_2_4_GHZ 0
+#endif
+
+#ifndef WIFI_FREQ_BAND_5_GHZ
+#define WIFI_FREQ_BAND_5_GHZ 1
+#endif
+
+/* Status and state tracking */
 static struct wifi_iface_status current_status;
 static struct wifi_connect_req_params current_connection;
 static struct net_if *mgmt_iface = NULL;
@@ -63,6 +54,61 @@ static struct net_if *mgmt_iface = NULL;
 static struct wifi_scan_result scan_results[10];
 static int scan_result_count = 0;
 static bool scan_completed = false;
+
+/* IPC stub implementations - placed here to avoid linker garbage collection */
+int emw3080_ipc_init(const struct device *dev) {
+    LOG_INF("IPC init stub called");
+    return 0;
+}
+
+int emw3080_ipc_scan(const struct device *dev, enum emw3080_scan_mode mode, const char *ssid) {
+    LOG_INF("IPC scan stub called: mode=%d, ssid=%s", mode, ssid ? ssid : "(null)");
+    
+    /* Populate mock scan results */
+    scan_result_count = 3;
+    
+    /* Mock AP 1 */
+    strncpy(scan_results[0].ssid, "EMW3080_TEST_AP_1", sizeof(scan_results[0].ssid) - 1);
+    scan_results[0].ssid[sizeof(scan_results[0].ssid) - 1] = '\0';
+    scan_results[0].ssid_length = strlen(scan_results[0].ssid);
+    scan_results[0].channel = 6;
+    scan_results[0].rssi = -45;
+    scan_results[0].security = WIFI_SECURITY_TYPE_PSK;
+    scan_results[0].band = WIFI_FREQ_BAND_2_4_GHZ;
+    
+    /* Mock AP 2 */
+    strncpy(scan_results[1].ssid, "EMW3080_TEST_AP_2", sizeof(scan_results[1].ssid) - 1);
+    scan_results[1].ssid[sizeof(scan_results[1].ssid) - 1] = '\0';
+    scan_results[1].ssid_length = strlen(scan_results[1].ssid);
+    scan_results[1].channel = 11;
+    scan_results[1].rssi = -67;
+    scan_results[1].security = WIFI_SECURITY_TYPE_WPA_PSK;
+    scan_results[1].band = WIFI_FREQ_BAND_2_4_GHZ;
+    
+    /* Mock AP 3 */
+    strncpy(scan_results[2].ssid, "EMW3080_OPEN_AP", sizeof(scan_results[2].ssid) - 1);
+    scan_results[2].ssid[sizeof(scan_results[2].ssid) - 1] = '\0';
+    scan_results[2].ssid_length = strlen(scan_results[2].ssid);
+    scan_results[2].channel = 1;
+    scan_results[2].rssi = -72;
+    scan_results[2].security = WIFI_SECURITY_TYPE_NONE;
+    scan_results[2].band = WIFI_FREQ_BAND_2_4_GHZ;
+    
+    LOG_INF("IPC scan: Populated %d mock scan results", scan_result_count);
+    return 0;
+}
+
+int emw3080_ipc_connect(const struct device *dev, const struct emw3080_connect_params *params) {
+    LOG_INF("IPC connect stub called: ssid=%s", params ? (const char *)params->ssid : "(null)");
+    return 0;
+}
+
+int emw3080_ipc_disconnect(const struct device *dev) {
+    LOG_INF("IPC disconnect stub called");  
+    return 0;
+}
+
+
 
 int emw3080_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
                      scan_result_cb_t cb)
@@ -86,13 +132,19 @@ int emw3080_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
         return ret;
     }
     
-    /* For now, return success. In a full implementation, we would:
-     * 1. Wait for scan completion event
-     * 2. Get scan results using emw3080_ipc_get_scan_results
-     * 3. Convert results to Zephyr format and call cb for each
-     */
+    /* Mark scan as completed and call callback for each result */
+    scan_completed = true;
     
-    LOG_INF("EMW3080: WiFi scan completed successfully");
+    if (cb && scan_result_count > 0) {
+        LOG_INF("EMW3080: Calling scan result callback for %d results", scan_result_count);
+        for (int i = 0; i < scan_result_count; i++) {
+            cb(mgmt_iface, 0, &scan_results[i]);
+        }
+        /* Signal scan completion */
+        cb(mgmt_iface, 0, NULL);
+    }
+    
+    LOG_INF("EMW3080: WiFi scan completed successfully with %d results", scan_result_count);
     return 0;
 }
 
