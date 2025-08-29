@@ -20,6 +20,7 @@ LOG_MODULE_REGISTER(emw3080_l2, CONFIG_LOG_DEFAULT_LEVEL);
 #include "emw3080_mgmt.h"
 #include "emw3080_socket.h"
 #include "emw3080_offload.h"
+#include "emw3080_spi.h"
 
 /* Define a dummy MAC address for now */
 static uint8_t emw3080_mac_addr[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
@@ -100,22 +101,48 @@ static int emw3080_l2_send(struct net_if *iface, struct net_pkt *pkt)
                                ntohs(udp_hdr.src_port), ntohs(udp_hdr.dst_port));
                         is_dhcp = true;
                         
+                        /* For SPI implementation demo: Auto-assign a static IP when DHCP is requested */
+                        LOG_INF("EMW3080 L2: SPI Implementation - Auto-assigning static IP for demo");
+                        
                         /* Set up a static IP address (192.168.1.100) */
                         struct in_addr addr = { .s_addr = htonl(0xC0A80164) };  /* 192.168.1.100 */
                         struct in_addr netmask_addr = { .s_addr = htonl(0xFFFFFF00) };  /* 255.255.255.0 */
                         struct in_addr gw_addr = { .s_addr = htonl(0xC0A80101) };  /* 192.168.1.1 */
                         
                         /* Add the IP address to the interface */
-                        net_if_ipv4_addr_add(iface, &addr, NET_ADDR_DHCP, 0);
+                        if (net_if_ipv4_addr_add(iface, &addr, NET_ADDR_DHCP, 0) != NULL) {
+                            LOG_INF("EMW3080 L2: Successfully added IP address to interface");
+                        } else {
+                            LOG_WRN("EMW3080 L2: Failed to add IP address to interface");
+                        }
                         
                         /* Set netmask and gateway */
                         net_if_ipv4_set_netmask_by_addr(iface, &addr, &netmask_addr);
                         net_if_ipv4_set_gw(iface, &gw_addr);
                         
                         /* Log the assigned IP information */
-                        LOG_INF("EMW3080 L2: Assigned IP=%d.%d.%d.%d",
+                        LOG_INF("EMW3080 L2: Demo IP Configuration Assigned:");
+                        LOG_INF("  IP Address: %d.%d.%d.%d",
                             (addr.s_addr) & 0xFF, (addr.s_addr >> 8) & 0xFF, 
                             (addr.s_addr >> 16) & 0xFF, (addr.s_addr >> 24) & 0xFF);
+                        LOG_INF("  Netmask: 255.255.255.0");
+                        LOG_INF("  Gateway: 192.168.1.1");
+                        
+                        /* Test SPI communication by sending a simple AT command */
+                        const struct device *spi_dev = DEVICE_DT_GET(DT_NODELABEL(spi2));
+                        if (spi_dev && device_is_ready(spi_dev)) {
+                            LOG_INF("EMW3080 L2: Testing SPI communication with AT command");
+                            char response[64];
+                            int spi_ret = emw3080_spi_send_at_cmd(spi_dev, "AT\r\n", 4, 
+                                                                 response, sizeof(response), 1000);
+                            if (spi_ret == 0) {
+                                LOG_INF("EMW3080 L2: SPI AT command successful: %s", response);
+                            } else {
+                                LOG_INF("EMW3080 L2: SPI AT command test returned: %d", spi_ret);
+                            }
+                        } else {
+                            LOG_WRN("EMW3080 L2: SPI device not ready for testing");
+                        }
                     }
                 }
             }

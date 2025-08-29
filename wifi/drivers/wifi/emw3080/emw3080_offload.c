@@ -94,13 +94,11 @@ int emw3080_offload_send_pkt(struct net_if *iface, struct net_pkt *pkt)
                 LOG_INF("DHCP packet detected - ports %d -> %d", src_port, dst_port);
                 is_dhcp = true;
                 
-                /* For DHCP packets, we handle the IP configuration in the L2 layer */
-                /* Just acknowledge it as successfully sent */
-                if (is_dhcp) {
-                    LOG_INF("EMW3080 offload_send_pkt: DHCP packet handled by L2");
-                    net_pkt_cursor_restore(pkt, &backup);
-                    return net_pkt_get_len(pkt);  /* Return packet size as successfully sent */
-                }
+                /* For DHCP packets in SPI implementation, we return success immediately */
+                /* The actual IP configuration is handled in the L2 layer */
+                LOG_INF("EMW3080 offload_send_pkt: DHCP packet - returning success (SPI implementation)");
+                net_pkt_cursor_restore(pkt, &backup);
+                return net_pkt_get_len(pkt);  /* Return packet size as successfully sent */
             }
             
         } else if (next_proto == IPPROTO_ICMP) {
