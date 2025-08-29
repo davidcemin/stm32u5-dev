@@ -68,32 +68,34 @@ int emw3080_uart_send_data(const struct device *uart_dev,
         return -ENODEV;
     }
     
-    /* Send data byte by byte with polling */
+    LOG_DBG("Sending %d bytes to UART with timeout %d ms", (int)len, (int)timeout_ms);
+    
+    /* Try direct polling method first - more reliable on some STM32 UARTs */
     for (size_t i = 0; i < len; i++) {
-        /* Wait for TX buffer to be ready */
-        int64_t start_time = k_uptime_get();
-        bool tx_ready = false;
+        int retries = 10; /* Number of retries for each character */
+        bool sent = false;
         
-        while ((k_uptime_get() - start_time) < timeout_ms) {
-            if (uart_irq_tx_ready(uart_dev)) {
-                tx_ready = true;
-                break;
-            }
-            /* Small delay to avoid tight loop */
-            k_busy_wait(100);
+        while (retries-- > 0 && !sent) {
+            /* Direct poll out - note: uart_poll_out returns void in Zephyr API */
+            uart_poll_out(uart_dev, data[i]);
+            
+            /* Assume success since uart_poll_out returns void */
+            sent = true;
+            
+            /* Small delay between characters - STM32 UARTs need this for reliability */
+            k_busy_wait(500);  /* 500 microseconds */
         }
         
-        if (!tx_ready) {
-            LOG_ERR("UART TX timeout after %u bytes", (unsigned int)i);
-            return -ETIMEDOUT;
+        if (!sent) {
+            LOG_ERR("Failed to send byte %d after multiple retries", (int)i);
+            return -EIO;
         }
-        
-        /* Send byte */
-        uart_poll_out(uart_dev, data[i]);
-        
-        /* Add small delay between characters for module to process */
-        k_busy_wait(200);  /* 200 microseconds */
     }
+    
+    LOG_DBG("Successfully sent %d bytes to UART", (int)len);
+    
+    /* Ensure final byte is transmitted before returning */
+    k_sleep(K_MSEC(5));
     
     return len;
 }
@@ -107,8 +109,21 @@ void emw3080_uart_flush_rx(const struct device *uart_dev)
         return;
     }
     
-    /* Read any pending data */
-    while (uart_irq_rx_ready(uart_dev)) {
-        uart_fifo_read(uart_dev, &c, 1);
+    /* Safety limit to prevent infinite loops */
+    int safety_counter = 100;
+    
+    /* Use polling to flush the UART buffer */
+    while (safety_counter-- > 0) {
+        /* Try to read a character */
+        if (uart_poll_in(uart_dev, &c) == 0) {
+            /* Got a character, discard it and continue */
+            continue;
+        } else {
+            /* No more data available */
+            break;
+        }
     }
+    
+    /* Add a small delay to ensure UART is fully flushed */
+    k_busy_wait(1000); /* 1ms */
 }

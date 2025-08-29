@@ -237,12 +237,28 @@ int main(void)
     print_app_banner();
 
     /* Give devices time to initialize */
-    k_sleep(K_SECONDS(1));
+    LOG_INF("Starting with extended boot delay for safety");
+    k_sleep(K_SECONDS(2));
     
-    /* Run hardware diagnostics */
-    LOG_INF("Running EMW3080 hardware diagnostics...");
+    /* Delayed initialization to prevent boot issues */
+    LOG_INF("Starting delayed EMW3080 initialization...");
+    
+    /* First, access only necessary functions to avoid crashing */
+    LOG_INF("Running basic diagnostics...");
     emw3080_debug_list_devices();
+    
+    /* Wait a bit more for safety */
+    k_sleep(K_MSEC(500));
+    
+    /* Continue with interface discovery */
+    LOG_INF("Checking interfaces...");
     emw3080_debug_list_interfaces();
+    
+    /* Wait another moment */
+    k_sleep(K_MSEC(500));
+    
+    /* Continue with more initialization */
+    LOG_INF("Checking initialization status...");
     emw3080_debug_check_initialization();
     
     /* Try fallback initialization before checking for interfaces */
@@ -255,8 +271,9 @@ int main(void)
         LOG_WRN("Fallback initialization returned: %d", ret);
     }
     
-    /* Wait for network interfaces to initialize */
-    k_sleep(K_MSEC(500));
+    /* Wait longer for network interfaces to initialize - 
+     * safe mode takes more time to initialize */
+    k_sleep(K_SECONDS(2));
     
     /* Register for Wi-Fi network events */
     net_mgmt_init_event_callback(&wifi_cb, wifi_mgmt_event_handler,
