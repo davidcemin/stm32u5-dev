@@ -55,11 +55,11 @@ struct emw3080_data {
     struct gpio_dt_spec reset_gpio;
     struct gpio_dt_spec power_gpio;
     
-    /* UART device for AT commands */
-    const struct device *uart;
+    /* SPI device for AT commands */
+    const struct device *spi;
     struct k_work_q workq;
     struct k_work request_work;
-    struct k_mutex uart_mutex;
+    struct k_mutex spi_mutex;
     
     /* Connection state */
     bool connected;
@@ -96,7 +96,7 @@ void emw3080_parse_ip_info(struct emw3080_data *data, char *resp);
 /* Get the device pointer for EMW3080 driver */
 const struct device *get_emw3080_device(void);
 
-/* Initialize the EMW3080 with a specific UART device */
-int emw3080_init_with_uart(const struct device *dev, const struct device *uart_dev);
+/* Initialize the EMW3080 with a specific SPI device */
+int emw3080_init_with_spi(const struct device *dev, const struct device *spi_dev);
 
 #endif /* ZEPHYR_DRIVERS_WIFI_EMW3080_EMW3080_H_ */

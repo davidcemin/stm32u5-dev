@@ -13,7 +13,7 @@ LOG_MODULE_REGISTER(emw3080, CONFIG_LOG_DEFAULT_LEVEL);
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
+#include <zephyr/drivers/spi.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_offload.h>
@@ -21,6 +21,7 @@ LOG_MODULE_REGISTER(emw3080, CONFIG_LOG_DEFAULT_LEVEL);
 #include <zephyr/sys/printk.h>
 
 #include "emw3080.h"
+#include "emw3080_spi.h"
 #include "emw3080_mgmt.h" /* Include the management header for function declarations */
 #include "emw3080_socket.h" /* Include the socket header for process_ipd function */
 #include "emw3080_uart.h" /* Include the UART header for UART functions */
@@ -116,7 +117,7 @@ static int emw3080_init(const struct device *dev)
     /* Minimal initialization to prevent boot issues */
     
     /* Initialize the semaphores and mutex */
-    k_mutex_init(&data->uart_mutex);
+    k_mutex_init(&data->spi_mutex);
     k_sem_init(&data->rx_buf.sem, 0, 1);
     
     /* Initialize socket structures - basic initialization only */
@@ -161,16 +162,15 @@ int emw3080_send_at_cmd(struct emw3080_data *data,
                       char *resp_buf, size_t resp_len,
                       uint32_t timeout_ms)
 {
-    int ret;
     int retry_count = 3; // Number of retries for AT commands
     
-    if (!data || !data->uart) {
-        LOG_ERR("Invalid data or UART device not available");
+    if (!data || !data->spi) {
+        LOG_ERR("Invalid data or SPI device not available");
         return -EINVAL;
     }
     
-    if (!device_is_ready(data->uart)) {
-        LOG_ERR("UART device not ready for AT commands");
+    if (!device_is_ready(data->spi)) {
+        LOG_ERR("SPI device not ready for AT commands");
         return -ENODEV;
     }
     
@@ -179,7 +179,7 @@ int emw3080_send_at_cmd(struct emw3080_data *data,
     
     while (retry_count-- > 0) {
         /* Lock UART access */
-        k_mutex_lock(&data->uart_mutex, K_FOREVER);
+        k_mutex_lock(&data->spi_mutex, K_FOREVER);
         
         /* Reset buffer */
         data->rx_buf.len = 0;
@@ -191,11 +191,22 @@ int emw3080_send_at_cmd(struct emw3080_data *data,
         /* Send command using direct polling */
         LOG_DBG("Writing command to UART (attempt %d)...", 3 - retry_count);
         
+        /* Log SPI status before sending */
+        LOG_INF("SPI device: %s, ready: %d", data->spi->name, device_is_ready(data->spi));
+        
         /* Direct send each character with poll_out - more reliable */
         for (size_t i = 0; i < cmd_len; i++) {
             uart_poll_out(data->uart, cmd[i]);
             k_busy_wait(500); /* 500us delay between chars */
+            
+            /* Log the first few characters being sent for debugging */
+            if (i < 4) {
+                LOG_DBG("TX char %d: 0x%02x (%c)", (int)i, cmd[i], 
+                       (cmd[i] >= 32 && cmd[i] <= 126) ? cmd[i] : '.');
+            }
         }
+        
+        LOG_INF("Command sent, waiting for response...");
         
         /* Wait a bit for any immediate responses */
         k_sleep(K_MSEC(10));
@@ -205,16 +216,32 @@ int emw3080_send_at_cmd(struct emw3080_data *data,
         uint32_t end_time = start_time + timeout_ms;
         bool got_ok = false;
         bool got_error = false;
+        int chars_received = 0;
+        
+        LOG_INF("Polling for response (timeout: %dms)...", timeout_ms);
+        
+        /* Add RX diagnostics */
+        int poll_attempts = 0;
         
         /* Read response with polling instead of interrupts */
         while (k_uptime_get_32() < end_time && !got_ok && !got_error) {
             uint8_t c;
+            poll_attempts++;
             
             /* Check if there's data available */
             if (uart_poll_in(data->uart, &c) == 0) {
+                chars_received++;
                 /* Got a character, add to buffer */
                 if (data->rx_buf.len < EMW3080_MAX_DATA_SIZE - 1) {
                     data->rx_buf.data[data->rx_buf.len++] = c;
+                    
+                    /* Log received characters for debugging */
+                    if (chars_received <= 10) {
+                        LOG_INF("RX char %d: 0x%02x (%c)", chars_received, c, 
+                               (c >= 32 && c <= 126) ? c : '.');
+                    } else if (chars_received == 11) {
+                        LOG_INF("RX: More characters received (total so far: %d)...", chars_received);
+                    }
                     
                     /* Check for OK response */
                     if (data->rx_buf.len >= 4 && 
@@ -242,6 +269,9 @@ int emw3080_send_at_cmd(struct emw3080_data *data,
             }
         }
         
+        LOG_INF("Response polling complete: poll_attempts=%d, chars_received=%d, got_ok=%d, got_error=%d", 
+               poll_attempts, chars_received, got_ok, got_error);
+        
         /* Copy response if buffer provided */
         if (resp_buf && resp_len > 0 && data->rx_buf.len > 0) {
             size_t copy_len = data->rx_buf.len < resp_len ? data->rx_buf.len : resp_len - 1;
@@ -253,11 +283,11 @@ int emw3080_send_at_cmd(struct emw3080_data *data,
         /* Check results */
         if (got_ok) {
             LOG_DBG("Command successful");
-            k_mutex_unlock(&data->uart_mutex);
+            k_mutex_unlock(&data->spi_mutex);
             return 0; /* Success */
         } else if (got_error) {
             LOG_WRN("Command returned error");
-            k_mutex_unlock(&data->uart_mutex);
+            k_mutex_unlock(&data->spi_mutex);
             return -EIO; /* Error */
         } else if (data->rx_buf.len > 0) {
             /* Got partial response but no OK/ERROR */
@@ -269,12 +299,12 @@ int emw3080_send_at_cmd(struct emw3080_data *data,
             for (size_t i = 0; i < data->rx_buf.len - 1; i++) {
                 if (data->rx_buf.data[i] == 'O' && data->rx_buf.data[i+1] == 'K') {
                     LOG_INF("Found OK in response");
-                    k_mutex_unlock(&data->uart_mutex);
+                    k_mutex_unlock(&data->spi_mutex);
                     return 0; /* Success */
                 }
             }
             
-            k_mutex_unlock(&data->uart_mutex);
+            k_mutex_unlock(&data->spi_mutex);
             
             if (retry_count > 0) {
                 LOG_WRN("Retrying command after delay...");
@@ -284,7 +314,7 @@ int emw3080_send_at_cmd(struct emw3080_data *data,
             return -EIO;
         } else {
             LOG_ERR("Command timed out");
-            k_mutex_unlock(&data->uart_mutex);
+            k_mutex_unlock(&data->spi_mutex);
             
             if (retry_count > 0) {
                 LOG_WRN("Retrying command after timeout...");
@@ -415,13 +445,13 @@ const struct device *get_emw3080_device(void)
 #include "emw3080_hw.h"
 
 /* Functions to be called from emw3080_fallback.c */
-int emw3080_init_with_uart(const struct device *dev, const struct device *uart_dev)
+int emw3080_init_with_spi(const struct device *dev, const struct device *spi_dev)
 {
     int ret;
     struct emw3080_data *data = dev->data;
     
-    /* Store the UART device pointer */
-    data->uart = uart_dev;
+    /* Store the SPI device pointer */
+    data->spi = spi_dev;
     
     /* Initialize hardware first */
     ret = emw3080_hw_init(data);

@@ -24,7 +24,7 @@ LOG_MODULE_REGISTER(emw3080_fallback, CONFIG_LOG_DEFAULT_LEVEL);
 
 /* Forward declarations from emw3080.c */
 extern const struct net_wifi_mgmt_offload emw3080_api;
-extern int emw3080_init_with_uart(const struct device *dev, const struct device *uart_dev);
+extern int emw3080_init_with_spi(const struct device *dev, const struct device *spi_dev);
 extern void emw3080_register_net_if(const struct device *dev);
 
 /* Define our own proper network interface registration function */
@@ -32,7 +32,7 @@ static void register_net_if_properly(const struct device *dev);
 
 /* Define data structure for EMW3080 driver */
 struct emw3080_data {
-    const struct device *uart;
+    const struct device *spi;
     struct gpio_dt_spec reset_gpio;
     struct gpio_dt_spec power_gpio;
     struct k_thread rx_thread;
@@ -141,10 +141,10 @@ int emw3080_direct_init(const struct device *uart4)
     static char device_name_with_emw3080[] = "EMW3080_FALLBACK";
     ((struct device *)&emw3080_fallback_dev)->name = device_name_with_emw3080;
     
-    /* Initialize the device with the UART */
-    int ret = emw3080_init_with_uart(&emw3080_fallback_dev, uart4);
+    /* Initialize the device with the SPI */
+    int ret = emw3080_init_with_spi(&emw3080_fallback_dev, spi2);
     if (ret < 0) {
-        LOG_ERR("Failed to initialize EMW3080 with UART4: %d", ret);
+        LOG_ERR("Failed to initialize EMW3080 with SPI2: %d", ret);
         return ret;
     }
 
@@ -191,18 +191,18 @@ int emw3080_fallback_init(void)
     LOG_INF("Trying fallback initialization for EMW3080");
     
     /* Get UART4 directly */
-    const struct device *uart4 = DEVICE_DT_GET(DT_NODELABEL(uart4));
-    if (!uart4) {
-        LOG_ERR("UART4 not found in fallback init");
+    const struct device *spi2 = DEVICE_DT_GET(DT_NODELABEL(spi2));
+    if (!spi2) {
+        LOG_ERR("SPI2 not found in fallback init");
         return -ENODEV;
     }
     
-    if (!device_is_ready(uart4)) {
-        LOG_ERR("UART4 not ready in fallback init");
+    if (!device_is_ready(spi2)) {
+        LOG_ERR("SPI2 not ready in fallback init");
         return -ENODEV;
     }
     
-    LOG_INF("Found UART4 device: %s", uart4->name);
+    LOG_INF("Found SPI2 device: %s", spi2->name);
     
     /* Initialize EMW3080 using the direct API */
     return emw3080_direct_init(uart4);

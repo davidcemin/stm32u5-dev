@@ -3,7 +3,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
+#include <zephyr/drivers/spi.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_offload.h>
 #include <zephyr/net/wifi_mgmt.h>
@@ -24,9 +24,9 @@ static __maybe_unused enum offloaded_net_if_types emw3080_get_interface_type(voi
 /* Function to initialize the device */
 static __maybe_unused int emw3080_net_init(const struct device *dev)
 {
-    /* Get the uart device */
-    const struct device *uart = DEVICE_DT_GET(DT_NODELABEL(uart4));
-    if (!device_is_ready(uart)) {
+    /* Get the SPI device */
+    const struct device *spi = DEVICE_DT_GET(DT_NODELABEL(spi2));
+    if (!device_is_ready(spi)) {
         return -ENODEV;
     }
     

@@ -188,7 +188,7 @@ int emw3080_send_pkt(struct net_if *iface, struct net_pkt *pkt)
     }
     
     /* Send actual data - here we need direct UART access */
-    k_mutex_lock(&data->uart_mutex, K_FOREVER);
+    k_mutex_lock(&data->spi_mutex, K_FOREVER);
     
     /* Reset buffer */
     data->rx_buf.len = 0;
@@ -198,7 +198,7 @@ int emw3080_send_pkt(struct net_if *iface, struct net_pkt *pkt)
     uint8_t *buffer = net_pkt_get_data(pkt, NULL);
     if (!buffer) {
         LOG_ERR("Failed to get packet data");
-        k_mutex_unlock(&data->uart_mutex);
+        k_mutex_unlock(&data->spi_mutex);
         socket->in_use = false;
         return -ENOMEM;
     }
@@ -217,7 +217,7 @@ int emw3080_send_pkt(struct net_if *iface, struct net_pkt *pkt)
         ret = -EIO;
     }
     
-    k_mutex_unlock(&data->uart_mutex);
+    k_mutex_unlock(&data->spi_mutex);
     
     /* For UDP, close the connection right away */
     if (proto == IPPROTO_UDP) {

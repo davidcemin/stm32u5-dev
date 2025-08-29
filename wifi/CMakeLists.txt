@@ -19,17 +19,20 @@ target_include_directories(app PRIVATE ${ZEPHYR_BASE}/include/zephyr/drivers)
 target_sources(app PRIVATE 
     src/main.c 
     src/wifi_shell.c
-    drivers/wifi/emw3080/emw3080.c
-    drivers/wifi/emw3080/emw3080_offload.c
-    drivers/wifi/emw3080/emw3080_debug.c
-    drivers/wifi/emw3080/emw3080_fallback.c
+    # Basic drivers only for now - others need UART to SPI conversion
+    drivers/wifi/emw3080/emw3080_spi.c
     drivers/wifi/emw3080/emw3080_net.c
-    drivers/wifi/emw3080/emw3080_mgmt.c
-    drivers/wifi/emw3080/emw3080_l2.c
-    drivers/wifi/emw3080/emw3080_socket.c
-    drivers/wifi/emw3080/emw3080_test.c
-    drivers/wifi/emw3080/emw3080_uart.c
-    drivers/wifi/emw3080/emw3080_hw.c
+    drivers/wifi/emw3080/emw3080_stubs.c  # Stub implementations for disabled modules
+    # drivers/wifi/emw3080/emw3080.c  # Temporarily disabled due to UART dependencies
+    # drivers/wifi/emw3080/emw3080_offload.c
+    # drivers/wifi/emw3080/emw3080_debug.c
+    # drivers/wifi/emw3080/emw3080_fallback.c
+    # drivers/wifi/emw3080/emw3080_mgmt.c
+    # drivers/wifi/emw3080/emw3080_l2.c
+    # drivers/wifi/emw3080/emw3080_test.c
+    # drivers/wifi/emw3080/emw3080_socket.c
+    # drivers/wifi/emw3080/emw3080_uart.c  # No longer needed
+    # drivers/wifi/emw3080/emw3080_hw.c    # Needs UART to SPI conversion
 )
 
 # Ensure we use networking configuration

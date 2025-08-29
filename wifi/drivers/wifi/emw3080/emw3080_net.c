@@ -9,7 +9,7 @@ LOG_MODULE_REGISTER(emw3080_net, CONFIG_LOG_DEFAULT_LEVEL);
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
+#include <zephyr/drivers/spi.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_core.h>
 #include <zephyr/net/net_context.h>
@@ -31,7 +31,7 @@ NET_L2_DECLARE_PUBLIC(EMW3080_L2);
 /* We'll use the L2 implementation directly instead of trying to set offload */
 
 /* Forward declarations */
-extern int emw3080_init_with_uart(const struct device *dev, const struct device *uart_dev);
+extern int emw3080_init_with_spi(const struct device *dev, const struct device *spi_dev);
 extern const struct net_offload emw3080_offload;
 
 /* Forward declarations of internal functions - Must be at the top! */
@@ -49,7 +49,7 @@ static int emw3080_get_status(const struct device *dev, struct wifi_iface_status
 /* Define data structure for network driver */
 struct emw3080_net_data {
     uint8_t mac_addr[6];
-    const struct device *uart;
+    const struct device *spi;
     struct net_if *iface;
 };
 
@@ -227,15 +227,15 @@ static int emw3080_net_device_init(const struct device *dev)
     /* Initialize our L2 layer */
     emw3080_l2_init();
     
-    /* Directly get UART4 */
-    const struct device *uart = DEVICE_DT_GET(DT_NODELABEL(uart4));
-    if (!uart || !device_is_ready(uart)) {
-        LOG_ERR("UART4 not available");
+    /* Directly get SPI2 */
+    const struct device *spi = DEVICE_DT_GET(DT_NODELABEL(spi2));
+    if (!spi || !device_is_ready(spi)) {
+        LOG_ERR("SPI2 not available");
         return -ENODEV;
     }
     
     struct emw3080_net_data *data = dev->data;
-    data->uart = uart;
+    data->spi = spi;
     
     /* This initialization will be called again by the networking stack */
     LOG_INF("EMW3080 network device ready");
