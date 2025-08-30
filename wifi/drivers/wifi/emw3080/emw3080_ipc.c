@@ -1,5 +1,6 @@
 #include "emw3080_ipc.h"
 #include "emw3080_spi.h"
+#include "emw3080_slip.h"
 #include "emw3080.h"
 #include <zephyr/device.h>
 #include <zephyr/drivers/spi.h>
@@ -63,8 +64,8 @@ int emw3080_ipc_send_command(const struct device *dev, uint16_t api_id,
     LOG_DBG("Sending MIPC command: api_id=0x%04x, req_id=%u, size=%zu", 
             api_id, packet->req_id, total_size);
     
-    /* Send command via SPI */
-    int ret = emw3080_spi_send_frame(spi_dev, tx_buffer, total_size);
+    /* Send command via SPI with SLIP framing */
+    int ret = emw3080_spi_send_slip_frame(spi_dev, tx_buffer, total_size);
     if (ret != 0) {
         LOG_ERR("Failed to send MIPC command: %d", ret);
         k_mutex_unlock(&data->spi_mutex);
@@ -75,7 +76,7 @@ int emw3080_ipc_send_command(const struct device *dev, uint16_t api_id,
     uint8_t rx_buffer[MIPC_PKT_MAX_SIZE];
     size_t received_len = 0;
     
-    ret = emw3080_spi_recv_frame(spi_dev, rx_buffer, sizeof(rx_buffer), &received_len);
+    ret = emw3080_spi_recv_slip_frame(spi_dev, rx_buffer, sizeof(rx_buffer), &received_len);
     if (ret != 0) {
         LOG_ERR("Failed to receive MIPC response: %d", ret);
         k_mutex_unlock(&data->spi_mutex);
@@ -137,6 +138,21 @@ int emw3080_ipc_init(const struct device *dev)
     
     LOG_INF("EMW3080 IPC initialized successfully");
     return 0;
+}
+
+int emw3080_ipc_init_auto(void) 
+{
+    LOG_INF("EMW3080 IPC: Auto-initializing - searching for device...");
+    
+    /* Try to find the EMW3080 device */
+    const struct device *dev = get_emw3080_device();
+    if (!dev) {
+        LOG_ERR("EMW3080 IPC: Could not find EMW3080 device for auto-init");
+        return -ENODEV;
+    }
+    
+    LOG_INF("EMW3080 IPC: Found device %s, initializing...", dev->name);
+    return emw3080_ipc_init(dev);
 }
 
 int emw3080_ipc_scan(const struct device *dev, enum emw3080_scan_mode mode, 

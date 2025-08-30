@@ -9,6 +9,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
+#include "emw3080_slip.h"
 
 /* EMW3080B SPI Protocol Constants */
 #define EMW3080_SPI_MAGIC_WRITE     0x02
@@ -35,7 +36,12 @@ struct emw3080_spi_header {
 /* Initialize SPI communication */
 int emw3080_spi_init(const struct device *spi_dev);
 
-/* Functions removed - MIPC binary protocol used instead of AT commands */
+/* Enhanced SPI functions with SLIP support */
+int emw3080_spi_send_slip_frame(const struct device *spi_dev,
+                                const uint8_t *data, size_t data_len);
+
+int emw3080_spi_recv_slip_frame(const struct device *spi_dev,
+                                uint8_t *data, size_t max_len, size_t *received_len);
 
 /* Low-level SPI frame functions */
 int emw3080_spi_send_frame(const struct device *spi_dev,

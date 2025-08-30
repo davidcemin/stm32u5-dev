@@ -14,6 +14,7 @@ LOG_MODULE_REGISTER(emw3080_spi, CONFIG_LOG_DEFAULT_LEVEL);
 #include <string.h>
 #include "emw3080.h"
 #include "emw3080_spi.h"
+#include "emw3080_slip.h"
 
 /* SPI configuration for EMW3080B */
 static struct spi_config emw3080_spi_cfg = {
@@ -334,5 +335,72 @@ int emw3080_spi_init(const struct device *spi_dev)
     }
     
     LOG_INF("EMW3080B SPI interface initialized for MIPC protocol");
+    return 0;
+}
+
+/* ================================== */
+/* SLIP-Enhanced SPI Functions */
+/* ================================== */
+
+int emw3080_spi_send_slip_frame(const struct device *spi_dev,
+                                const uint8_t *data, size_t data_len)
+{
+    if (!spi_dev || !data || data_len == 0) {
+        return -EINVAL;
+    }
+    
+    /* Encode data with SLIP framing */
+    uint8_t slip_buffer[emw3080_slip_max_encoded_size(data_len)];
+    uint16_t encoded_len;
+    
+    int ret = emw3080_slip_encode(data, data_len, slip_buffer, sizeof(slip_buffer), &encoded_len);
+    if (ret != 0) {
+        LOG_ERR("SLIP encoding failed: %d", ret);
+        return ret;
+    }
+    
+    LOG_DBG("Sending SLIP frame: %d bytes encoded to %d bytes", data_len, encoded_len);
+    
+    /* Send SLIP-encoded frame via standard SPI */
+    return emw3080_spi_send_frame(spi_dev, slip_buffer, encoded_len);
+}
+
+int emw3080_spi_recv_slip_frame(const struct device *spi_dev,
+                                uint8_t *data, size_t max_len, size_t *received_len)
+{
+    if (!spi_dev || !data || !received_len) {
+        return -EINVAL;
+    }
+    
+    /* Receive raw SPI frame */
+    uint8_t slip_buffer[EMW3080_SPI_MAX_FRAME_SIZE];
+    size_t slip_len;
+    
+    int ret = emw3080_spi_recv_frame(spi_dev, slip_buffer, sizeof(slip_buffer), &slip_len);
+    if (ret != 0) {
+        return ret;
+    }
+    
+    if (slip_len == 0) {
+        *received_len = 0;
+        return 0;
+    }
+    
+    /* Decode SLIP frame */
+    uint16_t decoded_len;
+    ret = emw3080_slip_decode(slip_buffer, slip_len, data, max_len, &decoded_len);
+    if (ret != 0) {
+        if (ret == -EAGAIN) {
+            /* No complete frame yet */
+            *received_len = 0;
+            return 0;
+        }
+        LOG_ERR("SLIP decoding failed: %d", ret);
+        return ret;
+    }
+    
+    *received_len = decoded_len;
+    LOG_DBG("Received SLIP frame: %d bytes decoded from %d bytes", decoded_len, slip_len);
+    
     return 0;
 }

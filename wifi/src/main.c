@@ -24,6 +24,7 @@
 
 /* Forward declaration for function to get network device */
 extern const struct device *get_emw3080_net_device(void);
+extern int slip_validation_test(void);  /* SLIP protocol validation test */
 
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
@@ -260,7 +261,7 @@ int main(void)
     k_sleep(K_SECONDS(2));
     
     /* Delayed initialization to prevent boot issues */
-    LOG_INF("Starting delayed EMW3080 initialization...");
+    LOG_INF("Starting enhanced EMW3080 initialization with SLIP protocol...");
     
     /* First, access only necessary functions to avoid crashing */
     LOG_INF("Running basic diagnostics...");
@@ -290,16 +291,21 @@ int main(void)
         LOG_WRN("Fallback initialization returned: %d", ret);
     }
     
-    /* Initialize EMW3080 IPC layer - CRITICAL for scan/connect to work */
-    LOG_INF("Initializing EMW3080 IPC layer...");
+    /* Initialize EMW3080 IPC layer with SLIP protocol support */
+    LOG_INF("Initializing EMW3080 IPC layer with SLIP protocol...");
     extern int emw3080_ipc_init_auto(void);
     ret = emw3080_ipc_init_auto();
     if (ret == 0) {
-        LOG_INF("EMW3080 IPC initialization successful");
+        LOG_INF("EMW3080 IPC with SLIP initialization successful");
     } else {
         LOG_ERR("EMW3080 IPC initialization failed: %d", ret);
         LOG_ERR("WiFi scan/connect will not work!");
     }
+    
+    /* Validate SLIP protocol implementation */
+    LOG_INF("Running SLIP protocol validation tests...");
+    slip_validation_test();
+    LOG_INF("SLIP validation tests completed");
     
     /* Wait longer for network interfaces to initialize - 
      * safe mode takes more time to initialize */

@@ -105,6 +105,7 @@ struct emw3080_connect_params {
 
 /* Function prototypes for IPC operations */
 int emw3080_ipc_init(const struct device *dev);
+int emw3080_ipc_init_auto(void);  /* Auto-initialize with device discovery */
 int emw3080_ipc_send_command(const struct device *dev, uint16_t api_id, 
                             const void *params, size_t param_size,
                             void *response, size_t response_size, 
