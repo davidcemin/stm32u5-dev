@@ -9,7 +9,10 @@
  * but with commas replaced by underscores */
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(emw3080, CONFIG_LOG_DEFAULT_LEVEL);
+#ifndef CONFIG_EMW3080_LOG_LEVEL
+#define CONFIG_EMW3080_LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
+#endif
+LOG_MODULE_REGISTER(emw3080, CONFIG_EMW3080_LOG_LEVEL);
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -130,6 +133,11 @@ static int emw3080_init(const struct device *dev)
     /* Get and store SPI device */
     if (data->spi) {
         LOG_INF("SPI device from DT binding: %s", data->spi->name);
+        /* Apply DT SPI config (freq, CS) */
+        const struct spi_dt_spec spec = SPI_DT_SPEC_GET(DT_DRV_INST(0),
+                                                        SPI_WORD_SET(8) | SPI_TRANSFER_MSB | SPI_MODE_CPOL | SPI_MODE_CPHA,
+                                                        0);
+        (void)emw3080_spi_set_dt_spec(&spec);
         
         /* Initialize SPI communication */
         int ret = emw3080_spi_init(data->spi);
@@ -281,6 +289,7 @@ static const struct wifi_mgmt_ops emw3080_mgmt_ops = {
     static struct emw3080_data emw3080_data_##inst = {                          \
         .reset_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, reset_gpios, {0}),         \
         .power_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, power_gpios, {0}),         \
+    .wake_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, wakeup_gpios, {0}),         \
         /* Get the SPI device from the device tree */                           \
         .spi = DEVICE_DT_GET(DT_INST_BUS(inst)),                                \
     };                                                                          \

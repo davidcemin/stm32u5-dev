@@ -31,13 +31,13 @@
     pinctrl-0 = <&spi2_sck &spi2_miso &spi2_mosi>;
     pinctrl-names = "default";
     status = "okay";
-    cs-gpios = <&gpiob 12 GPIO_ACTIVE_LOW>;  /* PB12 as NSS/CS */
 
     /* EMW3080B WiFi Module */
     emw3080: emw3080@0 {
         compatible = "mxchip,emw3080";
         reg = <0>;
         spi-max-frequency = <20000000>;  /* 20 MHz SPI clock */
+    cs-gpios = <&gpiob 12 GPIO_ACTIVE_LOW>;  /* PB12 as NSS/CS */
         
         /* GPIO control pins for EMW3080B */
         reset-gpios = <&gpiof 15 GPIO_ACTIVE_LOW>;   /* PF15 Reset */

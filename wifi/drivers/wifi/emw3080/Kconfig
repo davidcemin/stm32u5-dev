@@ -4,12 +4,36 @@ menuconfig EMW3080
 	bool "EMW3080 driver support"
 	default y
 	depends on WIFI && DT_HAS_MXCHIP_EMW3080_ENABLED
-	depends on UART_INTERRUPT_DRIVEN
+	depends on SPI
 	depends on GPIO
 	help
 	  Enable MXCHIP EMW3080 WiFi driver.
 
 if EMW3080
+
+config EMW3080_SPI_LOG_LEVEL
+	int "EMW3080 SPI log level"
+	range 0 4
+	default 2
+	help
+	  Per-module log level for the emw3080_spi driver.
+	  0=NONE, 1=ERR, 2=WRN, 3=INF, 4=DBG.
+
+config EMW3080_LOG_LEVEL
+	int "EMW3080 core log level"
+	range 0 4
+	default 2
+	help
+	  Per-module log level for the emw3080 core driver.
+	  0=NONE, 1=ERR, 2=WRN, 3=INF, 4=DBG.
+
+config EMW3080_INIT_LOG_LEVEL
+	int "EMW3080 init log level"
+	range 0 4
+	default 2
+	help
+	  Per-module log level for emw3080_init.
+	  0=NONE, 1=ERR, 2=WRN, 3=INF, 4=DBG.
 
 config EMW3080_RX_STACK_SIZE
 	int "Stack size for EMW3080 RX handler"

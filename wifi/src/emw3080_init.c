@@ -12,7 +12,10 @@
 #include <zephyr/logging/log.h>
 #include "../drivers/wifi/emw3080/emw3080.h"
 
-LOG_MODULE_REGISTER(emw3080_init, CONFIG_LOG_DEFAULT_LEVEL);
+#ifndef CONFIG_EMW3080_INIT_LOG_LEVEL
+#define CONFIG_EMW3080_INIT_LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
+#endif
+LOG_MODULE_REGISTER(emw3080_init, CONFIG_EMW3080_INIT_LOG_LEVEL);
 
 /* Forward declarations */
 void emw3080_print_device_info(void);

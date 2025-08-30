@@ -2,3 +2,6 @@
 
 # Include Zephyr's Kconfig
 source "Kconfig.zephyr"
+
+# Include local driver Kconfigs
+rsource "drivers/wifi/Kconfig"

@@ -15,7 +15,7 @@
 #define EMW3080_SPI_WRITE           0x0A
 #define EMW3080_SPI_READ            0x0B
 #define EMW3080_SPI_STATUS_CMD      0x04    /* Status query command */
-#define EMW3080_SPI_HEADER_SIZE     8       /* Updated to match MX WiFi format */
+#define EMW3080_SPI_HEADER_SIZE     5       /* MX WiFi HCI: type + len + lenx */
 #define EMW3080_SPI_MAX_PAYLOAD_SIZE 2048
 #define EMW3080_SPI_MAX_DATA_SIZE   2048    /* Maximum data size for transactions */
 #define EMW3080_SPI_MAX_FRAME_SIZE  (EMW3080_SPI_HEADER_SIZE + EMW3080_SPI_MAX_PAYLOAD_SIZE)
@@ -30,7 +30,6 @@ struct emw3080_spi_header {
     uint8_t type;       /* Command type (0x0A = write, 0x0B = read) */
     uint16_t len;       /* Payload length (little-endian) */
     uint16_t lenx;      /* Payload length XOR'd with 0xFFFF */
-    uint8_t dummy[3];   /* Dummy padding bytes */
 } __packed;
 
 /* SPI communication functions for EMW3080B - MX WiFi Compatible */
@@ -67,5 +66,8 @@ int emw3080_spi_recv_frame_duplex(const struct device *spi_dev,
 int emw3080_spi_send_recv_frame(const struct device *spi_dev,
                                const uint8_t *tx_data, size_t tx_len,
                                uint8_t *rx_data, size_t rx_max_len, size_t *rx_len);
+
+struct spi_dt_spec; /* forward declaration to avoid heavy header in public API */
+int emw3080_spi_set_dt_spec(const struct spi_dt_spec *spec);
 
 #endif /* EMW3080_SPI_H */

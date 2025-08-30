@@ -5,7 +5,10 @@
  */
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(emw3080_spi, CONFIG_LOG_DEFAULT_LEVEL);
+#ifndef CONFIG_EMW3080_SPI_LOG_LEVEL
+#define CONFIG_EMW3080_SPI_LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
+#endif
+LOG_MODULE_REGISTER(emw3080_spi, CONFIG_EMW3080_SPI_LOG_LEVEL);
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -19,9 +22,12 @@ LOG_MODULE_REGISTER(emw3080_spi, CONFIG_LOG_DEFAULT_LEVEL);
 /* SPI configuration for EMW3080B */
 static struct spi_config emw3080_spi_cfg = {
     .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB | SPI_MODE_CPOL | SPI_MODE_CPHA,
-    .frequency = 8000000, /* 8 MHz - EMW3080B supports up to 20MHz */
+    .frequency = 8000000, /* default; will be overridden from DT */
     .slave = 0,
 };
+
+/* Optional CS control populated from devicetree */
+static struct spi_cs_control emw3080_cs_ctrl;
 
 /* Mutex for SPI access synchronization */
 static K_MUTEX_DEFINE(spi_mutex);
@@ -56,7 +62,10 @@ int emw3080_spi_wait_ready(const struct device *spi_dev, uint32_t timeout_ms)
         k_msleep(1);
     }
     
-    LOG_WRN("EMW3080B not ready after %u ms (final status: 0x%02x)", timeout_ms, status);
+    static int not_ready_cnt;
+    if ((not_ready_cnt++ % 8) == 0) {
+        LOG_WRN("EMW3080B not ready after %u ms (final status: 0x%02x)", timeout_ms, status);
+    }
     return -ETIMEDOUT;
 }
 
@@ -71,9 +80,8 @@ static bool emw3080_spi_data_available(const struct device *spi_dev)
         bool data_avail = (status & EMW3080_SPI_STATUS_DATA_AVAILABLE) != 0;
         bool ready = (status & EMW3080_SPI_STATUS_READY) == 0; /* 0 = ready */
         bool busy = (status & EMW3080_SPI_STATUS_BUSY) != 0;
-        
-        LOG_INF("EMW3080 Status: 0x%02x - Ready:%s, DataAvail:%s, Busy:%s", 
-               status, ready ? "YES" : "NO", data_avail ? "YES" : "NO", busy ? "YES" : "NO");
+        LOG_DBG("EMW3080 Status: 0x%02x - Ready:%s, DataAvail:%s, Busy:%s", 
+                status, ready ? "YES" : "NO", data_avail ? "YES" : "NO", busy ? "YES" : "NO");
         return data_avail;
     }
     
@@ -87,7 +95,7 @@ int emw3080_spi_transceive(const struct device *spi_dev,
                           uint8_t *rx_buf, size_t rx_len)
 {
     /* CRITICAL: Add extensive safety checks to prevent crashes */
-    LOG_INF("EMW3080 SPI: Starting transceive - tx_len=%zu, rx_len=%zu", tx_len, rx_len);
+    LOG_DBG("EMW3080 SPI: transceive tx=%zu rx=%zu", tx_len, rx_len);
     
     if (!spi_dev) {
         LOG_ERR("EMW3080 SPI: NULL SPI device pointer");
@@ -122,13 +130,9 @@ int emw3080_spi_transceive(const struct device *spi_dev,
         return -EINVAL;
     }
     
-    /* Validate reasonable buffer sizes to prevent memory issues */
-    if (tx_len > 1024 || rx_len > 1024) {
-        LOG_ERR("EMW3080 SPI: Buffer size too large (tx:%zu, rx:%zu)", tx_len, rx_len);
-        return -EINVAL;
-    }
+    /* No arbitrary small cap; upper bounds enforced by protocol-specific send/recv */
     
-    LOG_INF("EMW3080 SPI: Safety checks passed, attempting SPI transaction");
+    LOG_DBG("EMW3080 SPI: Safety checks passed, attempting SPI transaction");
     
     /* SAFE APPROACH: Try the transaction with error handling */
     struct spi_buf tx_bufs[] = {
@@ -142,7 +146,7 @@ int emw3080_spi_transceive(const struct device *spi_dev,
     struct spi_buf_set rx_set = {.buffers = rx_bufs, .count = (rx_len > 0) ? 1 : 0};
     
     /* Log what we're about to do */
-    LOG_INF("EMW3080 SPI: Calling spi_transceive with config freq=%d", emw3080_spi_cfg.frequency);
+    LOG_DBG("EMW3080 SPI: spi_transceive freq=%d", emw3080_spi_cfg.frequency);
     
     /* CRITICAL: Try to detect SPI configuration issues before they crash */
     if (emw3080_spi_cfg.frequency == 0) {
@@ -164,7 +168,7 @@ int emw3080_spi_transceive(const struct device *spi_dev,
         return ret;
     }
     
-    LOG_INF("EMW3080 SPI: Transaction completed successfully");
+    LOG_DBG("EMW3080 SPI: Transaction completed successfully");
     return ret;
 }
 
@@ -195,19 +199,16 @@ int emw3080_spi_send_frame(const struct device *spi_dev,
         return ret;
     }
     
-    /* Prepare MX WiFi compatible frame */
+    /* Prepare MX WiFi compatible 5-byte header + payload */
     uint8_t frame[EMW3080_SPI_MAX_FRAME_SIZE];
     struct emw3080_spi_header *header = (struct emw3080_spi_header *)frame;
-    
-    /* Set MX WiFi header format */
+
     header->type = EMW3080_SPI_WRITE;
     header->len = sys_cpu_to_le16((uint16_t)data_len);
     header->lenx = sys_cpu_to_le16((uint16_t)(data_len ^ 0xFFFF));
-    memset(header->dummy, 0, sizeof(header->dummy));
-    
-    /* Copy payload */
+
     memcpy(frame + EMW3080_SPI_HEADER_SIZE, data, data_len);
-    
+
     size_t frame_len = EMW3080_SPI_HEADER_SIZE + data_len;
     
     LOG_DBG("Sending MX WiFi SPI frame: type=0x%02x, len=%u, lenx=0x%04x, total=%zu", 
@@ -239,7 +240,7 @@ int emw3080_spi_recv_frame(const struct device *spi_dev,
     
     /* Check if data is available */
     bool data_available = emw3080_spi_data_available(spi_dev);
-    LOG_INF("EMW3080 recv_frame: Data available = %s", data_available ? "YES" : "NO");
+    LOG_DBG("EMW3080 recv_frame: Data available = %s", data_available ? "YES" : "NO");
     
     if (!data_available) {
         k_mutex_unlock(&spi_mutex);
@@ -252,28 +253,54 @@ int emw3080_spi_recv_frame(const struct device *spi_dev,
         LOG_DBG("Device not ready for read, but data available - continuing anyway");
     }
     
-    /* Read frame header first */
+    /* Read frame header first. Many devices require a dummy byte after the READ cmd
+     * before valid data appears on MISO. We'll clock one dummy byte and ignore its RX,
+     * then read the 8-byte header. If validation fails, try to auto-align by 1-2 bytes.
+     */
     uint8_t read_cmd = EMW3080_SPI_READ;
-    uint8_t header_buf[EMW3080_SPI_HEADER_SIZE];
-    
+    uint8_t header_buf[EMW3080_SPI_HEADER_SIZE] = {0};
+
+    struct spi_buf tx_hdr_bufs[2] = {
+        { .buf = &read_cmd, .len = 1 },
+        { .buf = NULL, .len = EMW3080_SPI_HEADER_SIZE }, /* clock out header */
+    };
+    struct spi_buf rx_hdr_bufs[2] = {
+        { .buf = NULL, .len = 1 },                        /* ignore dummy */
+        { .buf = header_buf, .len = EMW3080_SPI_HEADER_SIZE },
+    };
+    struct spi_buf_set tx_hdr = { .buffers = tx_hdr_bufs, .count = 2 };
+    struct spi_buf_set rx_hdr = { .buffers = rx_hdr_bufs, .count = 2 };
+
     LOG_DBG("Reading frame header...");
-    ret = emw3080_spi_transceive(spi_dev, &read_cmd, 1, header_buf, EMW3080_SPI_HEADER_SIZE);
+    ret = spi_transceive(spi_dev, &emw3080_spi_cfg, &tx_hdr, &rx_hdr);
     if (ret != 0) {
         LOG_ERR("Failed to read frame header: %d", ret);
         k_mutex_unlock(&spi_mutex);
         return ret;
     }
-    
-    struct emw3080_spi_header *header = (struct emw3080_spi_header *)header_buf;
-    uint16_t payload_len = sys_le16_to_cpu(header->len);
-    uint16_t payload_lenx = sys_le16_to_cpu(header->lenx);
-    
-    LOG_DBG("Frame header: type=0x%02x, len=%u, lenx=0x%04x", 
-           header->type, payload_len, payload_lenx);
-    
-    /* Validate length field (MX WiFi protocol) */
-    if ((payload_len ^ payload_lenx) != 0xFFFF) {
-        LOG_ERR("Invalid length validation: %04x ^ %04x != 0xFFFF", payload_len, payload_lenx);
+    /* Interpret and validate header; attempt auto-alignment (offset 0..2) */
+    uint16_t payload_len = 0, payload_lenx = 0;
+    uint8_t type = 0;
+    bool valid = false;
+    for (int off = 0; off <= 2 && !valid; off++) {
+        const uint8_t *hb = &header_buf[off];
+        type = hb[0];
+        payload_len = sys_get_le16(&hb[1]);
+        payload_lenx = sys_get_le16(&hb[3]);
+        if ((payload_len ^ payload_lenx) == 0xFFFF) {
+            if (off != 0) {
+                LOG_WRN("Header misaligned by %d byte(s); adjusted", off);
+            }
+            valid = true;
+            break;
+        }
+    }
+    LOG_DBG("Frame header: type=0x%02x, len=%u, lenx=0x%04x", type, payload_len, payload_lenx);
+    if (!valid) {
+        static int bad_hdr_cnt;
+        if ((bad_hdr_cnt++ % 4) == 0) {
+            LOG_ERR("Invalid length validation: %04x ^ %04x != 0xFFFF", payload_len, payload_lenx);
+        }
         k_mutex_unlock(&spi_mutex);
         return -EBADMSG;
     }
@@ -285,9 +312,15 @@ int emw3080_spi_recv_frame(const struct device *spi_dev,
     }
     
     if (payload_len > 0) {
-        /* Read payload data */
+        /* Read payload data keeping CS active: tx NOPs for the payload length */
         LOG_DBG("Reading %u bytes of payload...", payload_len);
-        ret = emw3080_spi_transceive(spi_dev, NULL, 0, data, payload_len);
+        uint8_t nop = 0x00;
+        struct spi_buf tx_payload = { .buf = NULL, .len = payload_len };
+        struct spi_buf rx_payload = { .buf = data, .len = payload_len };
+        struct spi_buf_set txp = { .buffers = &tx_payload, .count = 1 };
+        struct spi_buf_set rxp = { .buffers = &rx_payload, .count = 1 };
+        ARG_UNUSED(nop);
+        ret = spi_transceive(spi_dev, &emw3080_spi_cfg, &txp, &rxp);
         if (ret == 0) {
             *received_len = payload_len;
             LOG_DBG("Successfully received frame: %u bytes", payload_len);
@@ -302,7 +335,7 @@ int emw3080_spi_recv_frame(const struct device *spi_dev,
             }
         } else {
             LOG_ERR("Failed to read payload: %d", ret);
-        }
+    }
     } else {
         LOG_DBG("Empty frame (no payload)");
     }
@@ -324,8 +357,7 @@ int emw3080_spi_init(const struct device *spi_dev)
         return -ENODEV;
     }
     
-    LOG_INF("Initializing EMW3080B SPI communication at %u Hz on device: %s", 
-            emw3080_spi_cfg.frequency, spi_dev->name);
+    LOG_INF("Initializing EMW3080B SPI on device: %s (freq=%u)", spi_dev->name, emw3080_spi_cfg.frequency);
     
     /* Initialize mutex */
     k_mutex_init(&spi_mutex);
@@ -351,6 +383,32 @@ int emw3080_spi_init(const struct device *spi_dev)
     }
     
     LOG_INF("EMW3080B SPI interface initialized for MIPC protocol");
+    return 0;
+}
+
+/* Apply DT-provided SPI settings (frequency, CS) to our static SPI config */
+int emw3080_spi_set_dt_spec(const struct spi_dt_spec *spec)
+{
+    if (!spec) {
+        return -EINVAL;
+    }
+    /* Validate bus and optional CS GPIO readiness */
+    if (!spi_is_ready_dt(spec)) {
+        return -ENODEV;
+    }
+
+    /* Apply full config from DT spec */
+    emw3080_spi_cfg.frequency = spec->config.frequency;
+    emw3080_spi_cfg.operation = spec->config.operation;
+    emw3080_spi_cfg.slave = spec->config.slave;
+
+    /* Copy CS control (it's a struct in this Zephyr version) */
+    emw3080_cs_ctrl = spec->config.cs;
+    emw3080_spi_cfg.cs = emw3080_cs_ctrl;
+
+    LOG_INF("Applied SPI DT spec: freq=%u, slave=%u, cs_gpio_port=%p",
+            emw3080_spi_cfg.frequency, emw3080_spi_cfg.slave,
+            (void *)emw3080_spi_cfg.cs.gpio.port);
     return 0;
 }
 

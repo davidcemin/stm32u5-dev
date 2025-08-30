@@ -2,16 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 menuconfig WIFI_DRIVERS
-	bool "WiFi Drivers"
-	depends on WIFI
-	help
-	  Enable WiFi drivers
+		bool "WiFi Drivers"
+		depends on WIFI
+		help
+			Enable WiFi drivers
 
 if WIFI_DRIVERS
 
-source "$(ZEPHYR_BASE)/drivers/wifi/Kconfig.drivers"
-
-# Include our custom EMW3080 driver
+# Include our custom EMW3080 driver only
 rsource "emw3080/Kconfig"
 
 endif # WIFI_DRIVERS

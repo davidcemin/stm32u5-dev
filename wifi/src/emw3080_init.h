@@ -24,4 +24,7 @@ void emw3080_print_device_info(void);
  */
 int emw3080_force_device_init(void);
 
+/* Optional delayed init hook implemented in the driver */
+int emw3080_delayed_init(void);
+
 #endif /* EMW3080_INIT_H */

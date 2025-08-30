@@ -1,12 +1,12 @@
 # Copyright (c) 2025 David Cemin
 # SPDX-License-Identifier: Apache-2.0
 
-description: MXCHIP EMW3080 WiFi module driver (AT Commands)
+description: MXCHIP EMW3080 WiFi module (SPI transport, bypass mode)
 
 compatible: "mxchip,emw3080"
 # Note: This must match the DT_DRV_COMPAT in emw3080.c (with _ instead of ,)
 
-include: uart-device.yaml
+include: spi-device.yaml
 
 properties:
   reset-gpios:
@@ -16,3 +16,7 @@ properties:
   power-gpios:
     type: phandle-array
     description: Power GPIO for the EMW3080 module
+
+  wakeup-gpios:
+    type: phandle-array
+    description: Optional wakeup/data-ready/flow GPIO asserted by module when data available

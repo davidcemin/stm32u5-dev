@@ -54,6 +54,7 @@ struct emw3080_data {
     const struct device *dev;
     struct gpio_dt_spec reset_gpio;
     struct gpio_dt_spec power_gpio;
+    struct gpio_dt_spec wake_gpio;
     
     /* SPI device for AT commands */
     const struct device *spi;
