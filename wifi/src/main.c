@@ -9,7 +9,6 @@
 #include "emw3080_init.h"
 
 /* EMW3080 test function declarations */
-extern int slip_validation_test(void);
 extern int emw3080_spi_basic_test(void);
 extern int emw3080_spi_init_basic(void);
 extern int emw3080_hci_comprehensive_test(void);
@@ -52,11 +51,11 @@ int main(void)
         goto cleanup;
     }
     
-    /* Bottom-up testing: SPI → SLIP → HCI validation */
-    LOG_INF("Starting bottom-up testing: SPI → SLIP → HCI layers...");
-    LOG_INF("Hardware supports both SPI and UART interfaces - testing both");
+    /* SPI → MX WiFi Protocol → HCI testing path */
+    LOG_INF("Starting SPI communication path testing...");
+    LOG_INF("Test sequence: SPI → MX WiFi Protocol → HCI");
     
-    /* Step 1: Bring up SPI interface if needed */
+    /* Step 1: Initialize SPI interface */
     LOG_INF("Step 1: Initializing SPI interface...");
     ret = emw3080_spi_init_basic();
     if (ret == 0) {
@@ -66,42 +65,28 @@ int main(void)
         goto cleanup;
     }
     
-    /* Step 2: Test SPI interface */
-    LOG_WRN("Step 2: Testing SPI interface (MX WiFi protocol)...");
+    /* Step 2: Test SPI with MX WiFi protocol */
+    LOG_WRN("Step 2: Testing SPI communication with MX WiFi protocol...");
     ret = emw3080_spi_basic_test();
     if (ret == 0) {
-        LOG_INF("✅ SPI interface test PASSED");
+        LOG_INF("✅ SPI + MX WiFi protocol test PASSED");
     } else {
-        LOG_ERR("❌ SPI interface test FAILED: %d", ret);
-        LOG_INF("SPI test failed - will still continue with SLIP/UART testing");
+        LOG_ERR("❌ SPI + MX WiFi protocol test FAILED: %d", ret);
+        goto cleanup;
     }
     
-    /* Step 3: Test SLIP protocol (for UART mode) */
-    LOG_WRN("Step 3: Testing SLIP protocol (for UART mode)...");
-    ret = slip_validation_test();
-    if (ret == 0) {
-        LOG_INF("✅ SLIP protocol test PASSED");
-    } else {
-        LOG_ERR("❌ SLIP protocol test FAILED: %d", ret);
-        LOG_INF("SLIP test failed - UART mode may not be available");
-    }
-    
-    /* Step 4: Test HCI layer (should work with either SPI or UART) */
-    LOG_WRN("Step 4: Testing HCI (Hardware Control Interface) layer...");
+    /* Step 3: Test HCI layer using SPI */
+    LOG_WRN("Step 3: Testing HCI layer (using SPI + MX WiFi protocol)...");
     ret = emw3080_hci_comprehensive_test();
     if (ret == 0) {
         LOG_INF("✅ HCI layer test PASSED");
     } else {
         LOG_ERR("❌ HCI layer test FAILED: %d", ret);
-        LOG_INF("HCI test failed - check which interface (SPI/UART) EMW3080 expects");
+        goto cleanup;
     }
     
-    LOG_INF("🎉 Bottom-up validation completed!");
-    LOG_INF("Results summary:");
-    LOG_INF("- SPI interface: %s", (emw3080_spi_basic_test() == 0) ? "✅ WORKING" : "❌ FAILED");
-    LOG_INF("- SLIP protocol: %s", (slip_validation_test() == 0) ? "✅ WORKING" : "❌ FAILED");  
-    LOG_INF("- HCI layer: %s", (emw3080_hci_comprehensive_test() == 0) ? "✅ WORKING" : "❌ FAILED");
-    LOG_INF("Use results to determine correct EMW3080 communication interface");
+    LOG_INF("🎉 SPI communication path validation completed successfully!");
+    LOG_INF("SPI ✅ | MX WiFi Protocol ✅ | HCI ✅ | Ready for WiFi management");
     
     /* Initialize network management for shell commands (optional) */
     LOG_INF("Initializing network management for shell support...");
