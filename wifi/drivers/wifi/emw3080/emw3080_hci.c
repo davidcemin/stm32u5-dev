@@ -107,7 +107,7 @@ int emw3080_hci_send_command(const struct device *dev,
         return -ENODEV;
     }
 
-    LOG_DBG("HCI: Sending command - cat:0x%02x cmd:0x%02x param_len:%zu", 
+    LOG_DBG("HCI: Sending MX WiFi command - cat:0x%02x cmd:0x%02x param_len:%zu", 
             category, command, param_len);
 
     /* Lock command mutex to ensure sequential access */
@@ -115,28 +115,25 @@ int emw3080_hci_send_command(const struct device *dev,
 
     int ret = -ENOSYS;
 
-    /* For now, at the HCI layer, we'll use direct SPI communication 
-     * without going through the IPC layer (that comes next) */
+    /* Build MX WiFi compatible command packet */
+    uint8_t mx_packet[EMW3080_HCI_MAX_PACKET_SIZE];
     
-    /* Build HCI command packet */
-    uint8_t hci_packet[EMW3080_HCI_MAX_PACKET_SIZE];
-    struct emw3080_hci_header *header = (struct emw3080_hci_header *)hci_packet;
-    
-    header->category = category;
-    header->command = command;
-    header->length = param_len;
+    /* For now, create a simple MX WiFi command format */
+    /* TODO: Research actual MX WiFi command format for ping, version, etc. */
+    mx_packet[0] = category;  /* Command category */
+    mx_packet[1] = command;   /* Command ID */
     
     /* Copy parameters if provided */
+    size_t payload_len = 2; /* category + command */
     if (params && param_len > 0) {
-        if (param_len > (EMW3080_HCI_MAX_PACKET_SIZE - sizeof(struct emw3080_hci_header))) {
+        if (param_len > (EMW3080_HCI_MAX_PACKET_SIZE - 2)) {
             LOG_ERR("Parameter size too large: %zu", param_len);
             ret = -EINVAL;
             goto cleanup;
         }
-        memcpy(hci_packet + sizeof(struct emw3080_hci_header), params, param_len);
+        memcpy(mx_packet + 2, params, param_len);
+        payload_len += param_len;
     }
-    
-    size_t total_packet_size = sizeof(struct emw3080_hci_header) + param_len;
     
     /* Get SPI device */
     struct emw3080_data *data = (struct emw3080_data *)dev->data;
@@ -148,30 +145,26 @@ int emw3080_hci_send_command(const struct device *dev,
         goto cleanup;
     }
     
-    /* Send command using direct SPI (without SLIP for now) */
-    ret = emw3080_spi_send_frame(spi_dev, hci_packet, total_packet_size);
+    /* Send command using MX WiFi SPI protocol */
+    ret = emw3080_spi_send_frame(spi_dev, mx_packet, payload_len);
     if (ret != 0) {
-        LOG_ERR("Failed to send HCI command via SPI: %d", ret);
+        LOG_ERR("Failed to send MX WiFi command via SPI: %d", ret);
         goto cleanup;
     }
     
-    /* For HCI layer testing, we'll just verify the send worked */
-    /* Response handling will be enhanced in the next iteration */
+    /* Try to receive response using MX WiFi protocol */
     if (response && response_len > 0) {
-        /* Try to receive response */
         uint8_t response_packet[EMW3080_HCI_MAX_PACKET_SIZE];
         size_t received_len = 0;
         
         ret = emw3080_spi_recv_frame(spi_dev, response_packet, sizeof(response_packet), &received_len);
-        if (ret == 0 && received_len > sizeof(struct emw3080_hci_header)) {
+        if (ret == 0 && received_len > 0) {
             /* Copy response data */
-            size_t response_data_len = received_len - sizeof(struct emw3080_hci_header);
-            size_t copy_len = (response_data_len < response_len) ? response_data_len : response_len;
-            
-            memcpy(response, response_packet + sizeof(struct emw3080_hci_header), copy_len);
-            LOG_DBG("HCI: Received response - %zu bytes", copy_len);
+            size_t copy_len = (received_len < response_len) ? received_len : response_len;
+            memcpy(response, response_packet, copy_len);
+            LOG_DBG("HCI: Received MX WiFi response - %zu bytes", copy_len);
         } else {
-            LOG_DBG("HCI: No response received (ret=%d, len=%zu)", ret, received_len);
+            LOG_DBG("HCI: No MX WiFi response received (ret=%d, len=%zu)", ret, received_len);
             /* For testing purposes, don't fail on missing response */
             ret = 0;
         }
