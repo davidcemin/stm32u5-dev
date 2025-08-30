@@ -9,7 +9,6 @@
 #include "emw3080_init.h"
 
 /* EMW3080 test function declarations */
-extern int slip_validation_test(void);
 extern int emw3080_spi_basic_test(void);
 extern int emw3080_spi_init_basic(void);
 extern int emw3080_hci_comprehensive_test(void);
@@ -52,8 +51,8 @@ int main(void)
         goto cleanup;
     }
     
-    /* Bottom-up testing: SPI → SLIP → HCI validation */
-    LOG_INF("Starting bottom-up testing: SPI → SLIP → HCI layers...");
+    /* Bottom-up testing: SPI → HCI validation */
+    LOG_INF("Starting bottom-up testing: SPI → HCI layers...");
     
     /* Step 1: Bring up SPI interface if needed */
     LOG_INF("Step 1: Initializing SPI interface...");
@@ -75,23 +74,8 @@ int main(void)
         goto cleanup;
     }
     
-    /* Step 3: Bring up SLIP if needed */
-    LOG_INF("Step 3: Initializing SLIP protocol...");
-    // SLIP is a protocol layer, no specific initialization needed beyond what's in the test
-    LOG_INF("✅ SLIP protocol ready (stateless protocol)");
-    
-    /* Step 4: Test SLIP */
-    LOG_WRN("Step 4: Testing SLIP protocol...");
-    ret = slip_validation_test();
-    if (ret == 0) {
-        LOG_INF("✅ SLIP protocol test PASSED");
-    } else {
-        LOG_ERR("❌ SLIP protocol test FAILED: %d", ret);
-        goto cleanup;
-    }
-    
-    /* Step 5: Test HCI layer */
-    LOG_WRN("Step 5: Testing HCI (Hardware Control Interface) layer...");
+    /* Step 3: Test HCI layer */
+    LOG_WRN("Step 3: Testing HCI (Hardware Control Interface) layer...");
     ret = emw3080_hci_comprehensive_test();
     if (ret == 0) {
         LOG_INF("✅ HCI layer test PASSED");
@@ -101,7 +85,7 @@ int main(void)
     }
     
     LOG_INF("🎉 Bottom-up validation completed successfully!");
-    LOG_INF("SPI ✅ | SLIP ✅ | HCI ✅ | Ready for WiFi management integration");
+    LOG_INF("SPI ✅ | HCI ✅ | Ready for WiFi management integration");
     
     /* Initialize network management for shell commands (optional) */
     LOG_INF("Initializing network management for shell support...");

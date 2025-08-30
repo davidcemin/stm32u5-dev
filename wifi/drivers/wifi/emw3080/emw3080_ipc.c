@@ -64,23 +64,41 @@ int emw3080_ipc_send_command(const struct device *dev, uint16_t api_id,
     LOG_DBG("Sending MIPC command: api_id=0x%04x, req_id=%u, size=%zu", 
             api_id, packet->req_id, total_size);
     
-    /* Send command via SPI with SLIP framing */
-    int ret = emw3080_spi_send_slip_frame(spi_dev, tx_buffer, total_size);
+    /* Send command via SPI with MX WiFi framing (not SLIP) */
+    int ret = emw3080_spi_send_frame(spi_dev, tx_buffer, total_size);
     if (ret != 0) {
         LOG_ERR("Failed to send MIPC command: %d", ret);
         k_mutex_unlock(&data->spi_mutex);
         return ret;
     }
     
-    /* Wait for response */
+    /* Wait for response with polling */
     uint8_t rx_buffer[MIPC_PKT_MAX_SIZE];
     size_t received_len = 0;
+    int poll_attempts = 0;
+    const int max_poll_attempts = 50; /* 5 seconds at 100ms intervals */
     
-    ret = emw3080_spi_recv_slip_frame(spi_dev, rx_buffer, sizeof(rx_buffer), &received_len);
-    if (ret != 0) {
-        LOG_ERR("Failed to receive MIPC response: %d", ret);
+    /* Give the module time to process the command */
+    k_sleep(K_MSEC(200));
+    
+    /* Poll for response */
+    do {
+        ret = emw3080_spi_recv_frame(spi_dev, rx_buffer, sizeof(rx_buffer), &received_len);
+        if (ret == 0 && received_len > 0) {
+            LOG_DBG("Received response after %d poll attempts", poll_attempts);
+            break;
+        }
+        
+        poll_attempts++;
+        if (poll_attempts < max_poll_attempts) {
+            k_sleep(K_MSEC(100));
+        }
+    } while (poll_attempts < max_poll_attempts);
+    
+    if (ret != 0 || received_len == 0) {
+        LOG_ERR("Failed to receive MIPC response after %d attempts: %d", poll_attempts, ret);
         k_mutex_unlock(&data->spi_mutex);
-        return ret;
+        return ret != 0 ? ret : -ETIMEDOUT;
     }
     
     /* Parse response */

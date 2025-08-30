@@ -57,10 +57,6 @@
 #define MIPC_API_WIFI_GET_IP_CMD    ((uint16_t)(MIPC_API_WIFI_CMD_BASE + 0x0007))
 #define MIPC_API_WIFI_BYPASS_SET_CMD ((uint16_t)(MIPC_API_WIFI_CMD_BASE + 0x000c))
 
-/* SPI Protocol Definitions */
-#define EMW3080_SPI_WRITE           (0x0A)
-#define EMW3080_SPI_READ            (0x0B)
-
 /* MIPC packet structure */
 struct emw3080_mipc_packet {
     uint32_t req_id;   /* Request ID */

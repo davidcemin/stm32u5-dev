@@ -69,6 +69,7 @@ extern "C" {
 #define EMW3080_HCI_MAX_SSID_LEN    32
 #define EMW3080_HCI_MAX_PASSWORD_LEN 64
 #define EMW3080_HCI_MAX_VERSION_LEN 32
+#define EMW3080_HCI_MAX_PACKET_SIZE 2048
 
 /* ================================== */
 /* HCI Data Structures */

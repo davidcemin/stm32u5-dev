@@ -69,12 +69,15 @@ static bool emw3080_spi_data_available(const struct device *spi_dev)
     int ret = emw3080_spi_transceive(spi_dev, &status_cmd, 1, &status, 1);
     if (ret == 0) {
         bool data_avail = (status & EMW3080_SPI_STATUS_DATA_AVAILABLE) != 0;
-        LOG_DBG("Data available check: %s (status=0x%02x)", 
-               data_avail ? "yes" : "no", status);
+        bool ready = (status & EMW3080_SPI_STATUS_READY) == 0; /* 0 = ready */
+        bool busy = (status & EMW3080_SPI_STATUS_BUSY) != 0;
+        
+        LOG_INF("EMW3080 Status: 0x%02x - Ready:%s, DataAvail:%s, Busy:%s", 
+               status, ready ? "YES" : "NO", data_avail ? "YES" : "NO", busy ? "YES" : "NO");
         return data_avail;
     }
     
-    LOG_DBG("Status check failed: %d", ret);
+    LOG_ERR("Status check failed: %d", ret);
     return false;
 }
 
@@ -192,21 +195,23 @@ int emw3080_spi_send_frame(const struct device *spi_dev,
         return ret;
     }
     
-    /* Prepare frame */
+    /* Prepare MX WiFi compatible frame */
     uint8_t frame[EMW3080_SPI_MAX_FRAME_SIZE];
     struct emw3080_spi_header *header = (struct emw3080_spi_header *)frame;
     
-    header->magic = EMW3080_SPI_MAGIC_WRITE;
-    header->reserved = 0;
-    header->length = sys_cpu_to_le16(data_len);
+    /* Set MX WiFi header format */
+    header->type = EMW3080_SPI_WRITE;
+    header->len = sys_cpu_to_le16((uint16_t)data_len);
+    header->lenx = sys_cpu_to_le16((uint16_t)(data_len ^ 0xFFFF));
+    memset(header->dummy, 0, sizeof(header->dummy));
     
     /* Copy payload */
     memcpy(frame + EMW3080_SPI_HEADER_SIZE, data, data_len);
     
     size_t frame_len = EMW3080_SPI_HEADER_SIZE + data_len;
     
-    LOG_DBG("Sending SPI frame: magic=0x%02x, len=%u, total=%zu", 
-            header->magic, data_len, frame_len);
+    LOG_DBG("Sending MX WiFi SPI frame: type=0x%02x, len=%u, lenx=0x%04x, total=%zu", 
+            header->type, sys_le16_to_cpu(header->len), sys_le16_to_cpu(header->lenx), frame_len);
     
     /* Send frame */
     ret = emw3080_spi_transceive(spi_dev, frame, frame_len, NULL, 0);
@@ -233,7 +238,10 @@ int emw3080_spi_recv_frame(const struct device *spi_dev,
     }
     
     /* Check if data is available */
-    if (!emw3080_spi_data_available(spi_dev)) {
+    bool data_available = emw3080_spi_data_available(spi_dev);
+    LOG_INF("EMW3080 recv_frame: Data available = %s", data_available ? "YES" : "NO");
+    
+    if (!data_available) {
         k_mutex_unlock(&spi_mutex);
         return -ENODATA;
     }
@@ -245,7 +253,7 @@ int emw3080_spi_recv_frame(const struct device *spi_dev,
     }
     
     /* Read frame header first */
-    uint8_t read_cmd = EMW3080_SPI_MAGIC_READ;
+    uint8_t read_cmd = EMW3080_SPI_READ;
     uint8_t header_buf[EMW3080_SPI_HEADER_SIZE];
     
     LOG_DBG("Reading frame header...");
@@ -257,10 +265,18 @@ int emw3080_spi_recv_frame(const struct device *spi_dev,
     }
     
     struct emw3080_spi_header *header = (struct emw3080_spi_header *)header_buf;
-    uint16_t payload_len = sys_le16_to_cpu(header->length);
+    uint16_t payload_len = sys_le16_to_cpu(header->len);
+    uint16_t payload_lenx = sys_le16_to_cpu(header->lenx);
     
-    LOG_DBG("Frame header: magic=0x%02x, reserved=0x%02x, length=%u", 
-           header->magic, header->reserved, payload_len);
+    LOG_DBG("Frame header: type=0x%02x, len=%u, lenx=0x%04x", 
+           header->type, payload_len, payload_lenx);
+    
+    /* Validate length field (MX WiFi protocol) */
+    if ((payload_len ^ payload_lenx) != 0xFFFF) {
+        LOG_ERR("Invalid length validation: %04x ^ %04x != 0xFFFF", payload_len, payload_lenx);
+        k_mutex_unlock(&spi_mutex);
+        return -EBADMSG;
+    }
     
     if (payload_len > max_len) {
         LOG_ERR("Received frame too large: %u > %zu", payload_len, max_len);
