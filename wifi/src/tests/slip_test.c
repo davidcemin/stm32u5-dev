@@ -8,7 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 
-#include "../drivers/wifi/emw3080/emw3080_slip.h"
+#include "../../drivers/wifi/emw3080/emw3080_slip.h"
 
 LOG_MODULE_REGISTER(slip_test, CONFIG_LOG_DEFAULT_LEVEL);
 
