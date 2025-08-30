@@ -61,8 +61,10 @@ slip_frame_t *emw3080_slip_input_byte(slip_decoder_t *decoder, uint8_t byte)
                 completed_frame = &decoder->frame;
                 LOG_DBG("SLIP frame completed, length: %d", decoder->index);
                 
-                /* Reset for next frame */
-                emw3080_slip_decoder_reset(decoder);
+                /* Reset decoder state for next frame, but keep frame data intact */
+                decoder->state = SLIP_STATE_NORMAL;
+                decoder->index = 0;
+                /* Note: frame data and complete flag remain until next frame start */
             } else {
                 /* Empty frame or start of frame - ignore */
                 LOG_DBG("SLIP: Empty frame or frame start");
@@ -77,6 +79,10 @@ slip_frame_t *emw3080_slip_input_byte(slip_decoder_t *decoder, uint8_t byte)
         default:
             /* Normal data byte */
             if (decoder->index < SLIP_MAX_FRAME_SIZE) {
+                /* If we're starting a new frame, clear the complete flag */
+                if (decoder->index == 0) {
+                    decoder->frame.complete = false;
+                }
                 decoder->buffer[decoder->index++] = byte;
             } else {
                 LOG_WRN("SLIP frame too large, resetting");
@@ -92,6 +98,10 @@ slip_frame_t *emw3080_slip_input_byte(slip_decoder_t *decoder, uint8_t byte)
         case SLIP_ESC_END:
             /* Escaped END character */
             if (decoder->index < SLIP_MAX_FRAME_SIZE) {
+                /* If we're starting a new frame, clear the complete flag */
+                if (decoder->index == 0) {
+                    decoder->frame.complete = false;
+                }
                 decoder->buffer[decoder->index++] = SLIP_END;
                 decoder->state = SLIP_STATE_NORMAL;
             } else {
@@ -104,6 +114,10 @@ slip_frame_t *emw3080_slip_input_byte(slip_decoder_t *decoder, uint8_t byte)
         case SLIP_ESC_ESC:
             /* Escaped ESC character */
             if (decoder->index < SLIP_MAX_FRAME_SIZE) {
+                /* If we're starting a new frame, clear the complete flag */
+                if (decoder->index == 0) {
+                    decoder->frame.complete = false;
+                }
                 decoder->buffer[decoder->index++] = SLIP_ESC;
                 decoder->state = SLIP_STATE_NORMAL;
             } else {
