@@ -4,33 +4,42 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/device.h>
 #include "../../drivers/wifi/emw3080/emw3080_spi.h"
 
 LOG_MODULE_REGISTER(emw3080_spi_test, CONFIG_LOG_DEFAULT_LEVEL);
+
+/* Get SPI device from devicetree */
+#define SPI_DEV_NODE DT_NODELABEL(spi2)
+static const struct device *spi_dev = DEVICE_DT_GET(SPI_DEV_NODE);
+
+/* Basic SPI initialization function */
+int emw3080_spi_init_basic(void)
+{
+    LOG_INF("=== EMW3080 SPI Basic Initialization ===");
+    
+    /* Check if SPI device is ready */
+    if (!device_is_ready(spi_dev)) {
+        LOG_ERR("SPI device not ready");
+        return -1;
+    }
+    
+    /* Initialize EMW3080 SPI driver */
+    int ret = emw3080_spi_init(spi_dev);
+    if (ret != 0) {
+        LOG_ERR("EMW3080 SPI initialization failed: %d", ret);
+        return ret;
+    }
+    
+    LOG_INF("✅ SPI device and EMW3080 SPI initialized successfully");
+    return 0;
+}
 
 int emw3080_spi_basic_test(void)
 {
     LOG_INF("=== EMW3080 SPI Basic Test ===");
     
-    /* Test 1: Get SPI device from external initialization */
-    extern int emw3080_spi_init(void);
-    extern const struct device *emw3080_get_spi_device(void);
-    
-    /* Initialize SPI first */
-    int ret = emw3080_spi_init();
-    if (ret != 0) {
-        LOG_ERR("SPI initialization failed: %d", ret);
-        return ret;
-    }
-    LOG_INF("✅ SPI initialized successfully");
-    
-    /* Get the device */
-    const struct device *spi_dev = emw3080_get_spi_device();
-    if (!spi_dev) {
-        LOG_ERR("SPI device not available");
-        return -1;
-    }
-    
+    /* Verify SPI device is still ready */
     if (!device_is_ready(spi_dev)) {
         LOG_ERR("SPI device not ready");
         return -1;
@@ -38,11 +47,11 @@ int emw3080_spi_basic_test(void)
     
     LOG_INF("✅ SPI device ready: %s", spi_dev->name);
     
-    /* Test 2: Basic SPI transaction */
+    /* Test 1: Basic SPI transaction */
     uint8_t tx_data = 0x55;  /* Test pattern */
     uint8_t rx_data = 0x00;
     
-    ret = emw3080_spi_transceive(spi_dev, &tx_data, 1, &rx_data, 1);
+    int ret = emw3080_spi_transceive(spi_dev, &tx_data, 1, &rx_data, 1);
     if (ret != 0) {
         LOG_ERR("SPI transaction failed: %d", ret);
         return ret;
@@ -51,7 +60,7 @@ int emw3080_spi_basic_test(void)
     LOG_INF("✅ SPI transaction completed - sent: 0x%02x, received: 0x%02x", 
             tx_data, rx_data);
     
-    /* Test 3: Multi-byte transaction */
+    /* Test 2: Multi-byte transaction */
     uint8_t multi_tx[] = {0xAA, 0x55, 0xCC, 0x33};
     uint8_t multi_rx[4] = {0};
     

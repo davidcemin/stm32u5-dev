@@ -26,6 +26,8 @@
 extern const struct device *get_emw3080_net_device(void);
 /* EMW3080 test function declarations */
 extern int slip_validation_test(void);
+extern int emw3080_spi_basic_test(void);
+extern int emw3080_spi_init_basic(void);
 
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
@@ -261,12 +263,39 @@ int main(void)
     LOG_INF("Starting with extended boot delay for safety");
     k_sleep(K_SECONDS(2));
     
-    /* Bottom-up testing: Focus on SLIP layer only for now */
-    LOG_INF("Starting bottom-up testing: SLIP protocol validation...");
+    /* Bottom-up testing: SPI → SLIP validation */
+    LOG_INF("Starting bottom-up testing: SPI → SLIP layers...");
     
-    /* Validate SLIP protocol implementation */
-    LOG_INF("Testing SLIP protocol layer...");
-    int ret = slip_validation_test();
+    /* Step 1: Bring up SPI interface if needed */
+    LOG_INF("Step 1: Initializing SPI interface...");
+    extern int emw3080_spi_init_basic(void);  // We'll need to create this function
+    int ret = emw3080_spi_init_basic();
+    if (ret == 0) {
+        LOG_INF("✅ SPI interface initialized successfully");
+    } else {
+        LOG_ERR("❌ SPI interface initialization failed: %d", ret);
+        goto cleanup;
+    }
+    
+    /* Step 2: Test SPI interface */
+    LOG_INF("Step 2: Testing SPI interface...");
+    extern int emw3080_spi_basic_test(void);
+    ret = emw3080_spi_basic_test();
+    if (ret == 0) {
+        LOG_INF("✅ SPI interface test PASSED");
+    } else {
+        LOG_ERR("❌ SPI interface test FAILED: %d", ret);
+        goto cleanup;
+    }
+    
+    /* Step 3: Bring up SLIP if needed */
+    LOG_INF("Step 3: Initializing SLIP protocol...");
+    // SLIP is a protocol layer, no specific initialization needed beyond what's in the test
+    LOG_INF("✅ SLIP protocol ready (stateless protocol)");
+    
+    /* Step 4: Test SLIP */
+    LOG_INF("Step 4: Testing SLIP protocol...");
+    ret = slip_validation_test();
     if (ret == 0) {
         LOG_INF("✅ SLIP protocol test PASSED");
     } else {
@@ -274,115 +303,10 @@ int main(void)
         goto cleanup;
     }
     
-    LOG_INF("🎉 SLIP validation completed successfully!");
-    LOG_INF("SLIP ✅ | Ready for next layer integration");
+    LOG_INF("🎉 Bottom-up validation completed successfully!");
+    LOG_INF("SPI ✅ | SLIP ✅ | Ready for next layer integration");
 
 cleanup:
-    
-    /* Wait longer for network interfaces to initialize - 
-     * safe mode takes more time to initialize */
-    k_sleep(K_SECONDS(2));
-    
-    /* Register for Wi-Fi network events */
-    net_mgmt_init_event_callback(&wifi_cb, wifi_mgmt_event_handler,
-                                NET_EVENT_WIFI_SCAN_RESULT |
-                                NET_EVENT_WIFI_SCAN_DONE |
-                                NET_EVENT_WIFI_CONNECT_RESULT |
-                                NET_EVENT_WIFI_DISCONNECT_RESULT);
-
-    net_mgmt_add_event_callback(&wifi_cb);
-
-    /* Register for DHCP events */
-    net_mgmt_init_event_callback(&dhcp_cb, dhcp_event_handler,
-                                NET_EVENT_IPV4_ADDR_ADD);
-    net_mgmt_add_event_callback(&dhcp_cb);
-
-    /* Check network interfaces after fallback init */
-    LOG_INF("Searching for WiFi interface...");
-    iface = get_wifi_iface();
-    if (!iface) {
-        LOG_ERR("ERROR: No network interfaces available!");
-        LOG_ERR("This might be due to:");
-        LOG_ERR("1. Missing CONFIG_NET_NATIVE=y or CONFIG_NET_DRIVERS=y");
-        LOG_ERR("2. Network driver not being registered properly");
-        LOG_ERR("3. Insufficient interface slots (check CONFIG_NET_IF_MAX_IPV4_COUNT)");
-        LOG_ERR("4. Hardware connectivity issues - check UART4 connections");
-        
-        /* Print detailed config info to help debugging */
-        LOG_INF("Network config status:");
-        LOG_INF("- CONFIG_NETWORKING is %s", IS_ENABLED(CONFIG_NETWORKING) ? "enabled" : "disabled");
-        LOG_INF("- CONFIG_NET_NATIVE is %s", IS_ENABLED(CONFIG_NET_NATIVE) ? "enabled" : "disabled");
-        LOG_INF("- CONFIG_NET_OFFLOAD is %s", IS_ENABLED(CONFIG_NET_OFFLOAD) ? "enabled" : "disabled");
-        LOG_INF("- CONFIG_NET_SOCKETS_OFFLOAD is %s", IS_ENABLED(CONFIG_NET_SOCKETS_OFFLOAD) ? "enabled" : "disabled");
-    } else {
-        const struct device *dev = net_if_get_device(iface);
-        LOG_INF("Found network interface: %s", dev ? dev->name : "unknown");
-        
-        /* Check if this is our EMW3080 interface */
-        bool is_emw3080 = false;
-        if (dev && dev->name) {
-            is_emw3080 = (strstr(dev->name, "EMW3080") != NULL ||
-                          strstr(dev->name, "emw3080") != NULL);
-        }
-        
-        if (is_emw3080) {
-            LOG_INF("==== EMW3080 WiFi interface ready! ====");
-            
-            /* For offload devices, the networking is handled by the offload API
-             * We don't need to manually attach L2 layers - NET_DEVICE_OFFLOAD_INIT handles this */
-            
-            /* Configure IPv4 for the interface */
-            LOG_INF("Setting up IPv4 configuration");
-            
-            /* Ensure the interface is up */
-            if (!net_if_is_up(iface)) {
-                LOG_INF("Bringing interface up");
-                ret = net_if_up(iface);
-                if (ret) {
-                    LOG_ERR("Failed to bring interface up: %d", ret);
-                }
-            } else {
-                LOG_INF("Interface is already up");
-            }
-            
-            /* Don't start DHCP here - wait until we're connected to a WiFi network */
-            LOG_INF("DHCP will be started automatically when connected to WiFi network");
-        } else {
-            LOG_WRN("Using non-EMW3080 interface: %s", dev ? dev->name : "unknown");
-            LOG_WRN("WiFi functionality may be limited");
-            
-            /* Still try to bring up the interface */
-            if (!net_if_is_up(iface)) {
-                LOG_INF("Bringing interface up");
-                net_if_up(iface);
-            }
-        }
-        
-    /* Print usage instructions */
-    LOG_INF("");
-    LOG_INF("==== WiFi Shell Commands ====");
-    LOG_INF("wifi scan                    - Scan for available networks");
-    LOG_INF("wifi connect <SSID> <PSK>    - Connect to a WiFi network");
-    LOG_INF("wifi disconnect              - Disconnect from current network");
-    LOG_INF("wifi status                  - Show current WiFi status");
-    LOG_INF("");
-    LOG_INF("==== Network Commands ====");
-    LOG_INF("net iface                    - Show network interfaces");
-    LOG_INF("net ipv4                     - Show IPv4 addresses");
-    
-    /* Test our AT command functionality */
-    LOG_INF("Testing AT commands...");
-    extern int emw3080_debug_at_commands(void);
-    ret = emw3080_debug_at_commands();
-    if (ret == 0) {
-        LOG_INF("AT command test successful");
-    } else {
-        LOG_ERR("AT command test failed: %d", ret);
-    }
-
-    LOG_INF("WiFi L2 implementation active");
-    }
-    
-    LOG_INF("Initialization complete - WiFi sample is running");
+    LOG_INF("Bottom-up testing complete - ready for shell commands");
     return 0;
 }
