@@ -11,6 +11,7 @@
 extern int slip_validation_test(void);
 extern int emw3080_spi_basic_test(void);
 extern int emw3080_spi_init_basic(void);
+extern int emw3080_hci_comprehensive_test(void);
 
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
@@ -38,8 +39,8 @@ int main(void)
     LOG_INF("Starting with extended boot delay for safety");
     k_sleep(K_SECONDS(2));
     
-    /* Bottom-up testing: SPI → SLIP validation */
-    LOG_INF("Starting bottom-up testing: SPI → SLIP layers...");
+    /* Bottom-up testing: SPI → SLIP → HCI validation */
+    LOG_INF("Starting bottom-up testing: SPI → SLIP → HCI layers...");
     
     /* Step 1: Bring up SPI interface if needed */
     LOG_INF("Step 1: Initializing SPI interface...");
@@ -76,8 +77,18 @@ int main(void)
         goto cleanup;
     }
     
+    /* Step 5: Test HCI layer */
+    LOG_INF("Step 5: Testing HCI (Hardware Control Interface) layer...");
+    ret = emw3080_hci_comprehensive_test();
+    if (ret == 0) {
+        LOG_INF("✅ HCI layer test PASSED");
+    } else {
+        LOG_ERR("❌ HCI layer test FAILED: %d", ret);
+        goto cleanup;
+    }
+    
     LOG_INF("🎉 Bottom-up validation completed successfully!");
-    LOG_INF("SPI ✅ | SLIP ✅ | Ready for next layer integration");
+    LOG_INF("SPI ✅ | SLIP ✅ | HCI ✅ | Ready for WiFi management integration");
     
     /* Initialize network management for shell commands (optional) */
     LOG_INF("Initializing network management for shell support...");

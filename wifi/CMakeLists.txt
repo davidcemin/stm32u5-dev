@@ -22,10 +22,12 @@ target_sources(app PRIVATE
     src/emw3080_network.c
     src/tests/slip_test.c
     src/tests/emw3080_spi_test.c  # SPI test - now needed for main function
+    src/tests/emw3080_hci_test.c  # HCI test - for bottom-up testing
     drivers/wifi/emw3080/emw3080_main_stubs.c
     drivers/wifi/emw3080/emw3080_spi.c
     drivers/wifi/emw3080/emw3080_slip.c
     drivers/wifi/emw3080/emw3080_ipc.c
+    drivers/wifi/emw3080/emw3080_hci.c
     drivers/wifi/emw3080/emw3080_mgmt.c
     drivers/wifi/emw3080/emw3080_compat.c
 )
