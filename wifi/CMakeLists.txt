@@ -16,21 +16,16 @@ target_include_directories(app PRIVATE ${ZEPHYR_BASE}/include/zephyr/net)
 target_include_directories(app PRIVATE ${ZEPHYR_BASE}/include/zephyr/drivers)
 
 # Add driver sources directly to the application
-target_sources(app PRIVATE 
-    src/main.c 
+target_sources(app PRIVATE
+    src/main.c
     src/wifi_shell.c
     src/slip_test.c
-    drivers/wifi/emw3080/emw3080.c
+    drivers/wifi/emw3080/emw3080_main_stubs.c
     drivers/wifi/emw3080/emw3080_spi.c
     drivers/wifi/emw3080/emw3080_slip.c
     drivers/wifi/emw3080/emw3080_ipc.c
-    drivers/wifi/emw3080/emw3080_net.c
-    drivers/wifi/emw3080/emw3080_offload.c
     drivers/wifi/emw3080/emw3080_mgmt.c
     drivers/wifi/emw3080/emw3080_compat.c
-    drivers/wifi/emw3080/emw3080_l2.c
-    drivers/wifi/emw3080/emw3080_socket.c
-    drivers/wifi/emw3080/emw3080_main_stubs.c
 )
 
 # Ensure we use networking configuration

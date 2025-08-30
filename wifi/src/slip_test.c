@@ -41,10 +41,39 @@ static int test_slip_encoding(void)
     }
     if (encoded_len % 8 != 0) printk("\n");
 
+    /* Verify the encoding manually first */
+    LOG_INF("Verifying SLIP encoding manually...");
+    if (encoded[0] != 0xC0) {
+        LOG_ERR("Missing SLIP frame start marker");
+        return -1;
+    }
+    if (encoded[encoded_len - 1] != 0xC0) {
+        LOG_ERR("Missing SLIP frame end marker");
+        return -1;
+    }
+    LOG_INF("✅ SLIP frame markers present");
+
     /* Test decoding */
+    LOG_INF("Attempting SLIP decoding...");
     ret = emw3080_slip_decode(encoded, encoded_len, decoded, sizeof(decoded), &decoded_len);
     if (ret != 0) {
         LOG_ERR("SLIP decoding failed: %d", ret);
+        
+        /* Debug: Try byte-by-byte decoding */
+        LOG_INF("Debugging with byte-by-byte decoder...");
+        slip_decoder_t decoder;
+        emw3080_slip_decoder_init(&decoder);
+        
+        for (int i = 0; i < encoded_len; i++) {
+            slip_frame_t *frame = emw3080_slip_input_byte(&decoder, encoded[i]);
+            LOG_DBG("Byte %d (0x%02x): frame=%p, complete=%d", 
+                    i, encoded[i], frame, frame ? frame->complete : 0);
+            if (frame && frame->complete) {
+                LOG_INF("Frame completed at byte %d, length %d", i, frame->length);
+                break;
+            }
+        }
+        
         return ret;
     }
 
@@ -62,7 +91,7 @@ static int test_slip_encoding(void)
         return -1;
     }
 
-    LOG_INF("SLIP encoding/decoding test PASSED");
+    LOG_INF("✅ SLIP encoding/decoding test PASSED");
     return 0;
 }
 

@@ -24,7 +24,8 @@
 
 /* Forward declaration for function to get network device */
 extern const struct device *get_emw3080_net_device(void);
-extern int slip_validation_test(void);  /* SLIP protocol validation test */
+/* EMW3080 test function declarations */
+extern int slip_validation_test(void);
 
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
@@ -260,52 +261,23 @@ int main(void)
     LOG_INF("Starting with extended boot delay for safety");
     k_sleep(K_SECONDS(2));
     
-    /* Delayed initialization to prevent boot issues */
-    LOG_INF("Starting enhanced EMW3080 initialization with SLIP protocol...");
-    
-    /* First, access only necessary functions to avoid crashing */
-    LOG_INF("Running basic diagnostics...");
-    emw3080_debug_list_devices();
-    
-    /* Wait a bit more for safety */
-    k_sleep(K_MSEC(500));
-    
-    /* Continue with interface discovery */
-    LOG_INF("Checking interfaces...");
-    emw3080_debug_list_interfaces();
-    
-    /* Wait another moment */
-    k_sleep(K_MSEC(500));
-    
-    /* Continue with more initialization */
-    LOG_INF("Checking initialization status...");
-    emw3080_debug_check_initialization();
-    
-    /* Try fallback initialization before checking for interfaces */
-    LOG_INF("Attempting fallback initialization...");
-    extern int emw3080_fallback_init(void);
-    int ret = emw3080_fallback_init();
-    if (ret == 0) {
-        LOG_INF("Fallback initialization successful");
-    } else {
-        LOG_WRN("Fallback initialization returned: %d", ret);
-    }
-    
-    /* Initialize EMW3080 IPC layer with SLIP protocol support */
-    LOG_INF("Initializing EMW3080 IPC layer with SLIP protocol...");
-    extern int emw3080_ipc_init_auto(void);
-    ret = emw3080_ipc_init_auto();
-    if (ret == 0) {
-        LOG_INF("EMW3080 IPC with SLIP initialization successful");
-    } else {
-        LOG_ERR("EMW3080 IPC initialization failed: %d", ret);
-        LOG_ERR("WiFi scan/connect will not work!");
-    }
+    /* Bottom-up testing: Focus on SLIP layer only for now */
+    LOG_INF("Starting bottom-up testing: SLIP protocol validation...");
     
     /* Validate SLIP protocol implementation */
-    LOG_INF("Running SLIP protocol validation tests...");
-    slip_validation_test();
-    LOG_INF("SLIP validation tests completed");
+    LOG_INF("Testing SLIP protocol layer...");
+    int ret = slip_validation_test();
+    if (ret == 0) {
+        LOG_INF("✅ SLIP protocol test PASSED");
+    } else {
+        LOG_ERR("❌ SLIP protocol test FAILED: %d", ret);
+        goto cleanup;
+    }
+    
+    LOG_INF("🎉 SLIP validation completed successfully!");
+    LOG_INF("SLIP ✅ | Ready for next layer integration");
+
+cleanup:
     
     /* Wait longer for network interfaces to initialize - 
      * safe mode takes more time to initialize */

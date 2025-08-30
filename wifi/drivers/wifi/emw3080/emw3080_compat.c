@@ -49,3 +49,16 @@ int emw3080_send_dhcp_packet(const struct device *dev, struct net_pkt *pkt)
     /* In a full implementation, this would send DHCP packets through the SLIP-enhanced interface */
     return 0;
 }
+
+/* Device access function stubs for wifi_shell.c */
+const struct device *get_emw3080_device(void)
+{
+    LOG_DBG("Compatibility stub: get_emw3080_device() - no device in SLIP test mode");
+    return NULL;  /* Return NULL since we're not using actual device in bottom-up testing */
+}
+
+const struct device *get_emw3080_net_device(void)
+{
+    LOG_DBG("Compatibility stub: get_emw3080_net_device() - no network device in SLIP test mode");
+    return NULL;  /* Return NULL since we're not using network device in bottom-up testing */
+}
