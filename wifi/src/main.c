@@ -6,6 +6,7 @@
 #include "../drivers/wifi/emw3080/emw3080_test.h"
 #include "../drivers/wifi/emw3080/emw3080_offload.h"
 #include "emw3080_network.h"
+#include "emw3080_init.h"
 
 /* EMW3080 test function declarations */
 extern int slip_validation_test(void);
@@ -39,12 +40,24 @@ int main(void)
     LOG_INF("Starting with extended boot delay for safety");
     k_sleep(K_SECONDS(2));
     
+    /* Ensure EMW3080 device is properly initialized */
+    LOG_WRN("Step 0: Ensuring EMW3080 device registration...");
+    int ret = emw3080_ensure_device_ready();
+    if (ret == 0) {
+        LOG_INF("✅ EMW3080 device registration verified");
+        emw3080_print_device_info();
+    } else {
+        LOG_ERR("❌ EMW3080 device registration failed: %d", ret);
+        LOG_ERR("This indicates a device tree or driver initialization issue");
+        goto cleanup;
+    }
+    
     /* Bottom-up testing: SPI → SLIP → HCI validation */
     LOG_INF("Starting bottom-up testing: SPI → SLIP → HCI layers...");
     
     /* Step 1: Bring up SPI interface if needed */
     LOG_INF("Step 1: Initializing SPI interface...");
-    int ret = emw3080_spi_init_basic();
+    ret = emw3080_spi_init_basic();
     if (ret == 0) {
         LOG_INF("✅ SPI interface initialized successfully");
     } else {
@@ -53,7 +66,7 @@ int main(void)
     }
     
     /* Step 2: Test SPI interface */
-    LOG_INF("Step 2: Testing SPI interface...");
+    LOG_WRN("Step 2: Testing SPI interface...");
     ret = emw3080_spi_basic_test();
     if (ret == 0) {
         LOG_INF("✅ SPI interface test PASSED");
@@ -68,7 +81,7 @@ int main(void)
     LOG_INF("✅ SLIP protocol ready (stateless protocol)");
     
     /* Step 4: Test SLIP */
-    LOG_INF("Step 4: Testing SLIP protocol...");
+    LOG_WRN("Step 4: Testing SLIP protocol...");
     ret = slip_validation_test();
     if (ret == 0) {
         LOG_INF("✅ SLIP protocol test PASSED");
@@ -78,7 +91,7 @@ int main(void)
     }
     
     /* Step 5: Test HCI layer */
-    LOG_INF("Step 5: Testing HCI (Hardware Control Interface) layer...");
+    LOG_WRN("Step 5: Testing HCI (Hardware Control Interface) layer...");
     ret = emw3080_hci_comprehensive_test();
     if (ret == 0) {
         LOG_INF("✅ HCI layer test PASSED");

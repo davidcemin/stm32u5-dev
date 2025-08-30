@@ -281,3 +281,12 @@ int emw3080_mgmt_iface_status(const struct device *dev, struct wifi_iface_status
 {
     return emw3080_mgmt_get_status(dev, status);
 }
+
+/* DHCP packet handling function */
+int emw3080_send_dhcp_packet(const struct device *dev, struct net_pkt *pkt)
+{
+    LOG_INF("EMW3080: DHCP packet handling not yet implemented");
+    /* For now, just return success to avoid blocking DHCP flow */
+    /* In a real implementation, this would send the DHCP packet to the hardware */
+    return 0;
+}

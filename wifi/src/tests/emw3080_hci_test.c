@@ -8,6 +8,7 @@
 
 #include "../../drivers/wifi/emw3080/emw3080_hci.h"
 #include "../../drivers/wifi/emw3080/emw3080_test.h"
+#include "../../drivers/wifi/emw3080/emw3080.h"  /* For get_emw3080_device() */
 #include <zephyr/logging/log.h>
 #include <string.h>
 
@@ -43,11 +44,18 @@ int emw3080_hci_system_test(void)
 {
     LOG_INF("=== EMW3080 HCI System Commands Test ===");
     
+    /* Get the EMW3080 device for testing */
+    const struct device *dev = get_emw3080_device();
+    if (!dev) {
+        LOG_ERR("❌ No EMW3080 device available for HCI testing");
+        return -ENODEV;
+    }
+    
     int ret;
     
     /* Test 1: Ping the module */
     LOG_INF("Test 1: Module ping...");
-    ret = emw3080_hci_ping(NULL);  /* Using NULL device for auto mode */
+    ret = emw3080_hci_ping(dev);
     if (ret == 0) {
         LOG_INF("✅ Module ping successful");
     } else {
@@ -57,7 +65,7 @@ int emw3080_hci_system_test(void)
     /* Test 2: Get version information */
     LOG_INF("Test 2: Get version information...");
     struct emw3080_hci_version version;
-    ret = emw3080_hci_get_version(NULL, &version);
+    ret = emw3080_hci_get_version(dev, &version);
     if (ret == 0) {
         LOG_INF("✅ Version info retrieved:");
         LOG_INF("  Firmware: %s", version.firmware);
@@ -69,7 +77,7 @@ int emw3080_hci_system_test(void)
     
     /* Test 3: Check if module is ready */
     LOG_INF("Test 3: Check module readiness...");
-    ret = emw3080_hci_is_ready(NULL);
+    ret = emw3080_hci_is_ready(dev);
     if (ret == 0) {
         LOG_INF("✅ Module is ready");
     } else {
@@ -87,12 +95,19 @@ int emw3080_hci_wifi_test(void)
 {
     LOG_INF("=== EMW3080 HCI WiFi Commands Test ===");
     
+    /* Get the EMW3080 device for testing */
+    const struct device *dev = get_emw3080_device();
+    if (!dev) {
+        LOG_ERR("❌ No EMW3080 device available for HCI WiFi testing");
+        return -ENODEV;
+    }
+    
     int ret;
     
     /* Test 1: Get MAC address */
     LOG_INF("Test 1: Get WiFi MAC address...");
     struct emw3080_hci_mac mac;
-    ret = emw3080_hci_wifi_get_mac(NULL, &mac);
+    ret = emw3080_hci_wifi_get_mac(dev, &mac);
     if (ret == 0) {
         LOG_INF("✅ MAC address retrieved successfully");
     } else {
@@ -107,7 +122,7 @@ int emw3080_hci_wifi_test(void)
         .dwell_time = 100,
         .ssid = ""     /* Scan all SSIDs */
     };
-    ret = emw3080_hci_wifi_scan(NULL, &scan_params);
+    ret = emw3080_hci_wifi_scan(dev, &scan_params);
     if (ret == 0) {
         LOG_INF("✅ WiFi scan initiated successfully");
     } else {
@@ -117,7 +132,7 @@ int emw3080_hci_wifi_test(void)
     /* Test 3: Get WiFi status */
     LOG_INF("Test 3: Get WiFi connection status...");
     struct emw3080_hci_wifi_status status;
-    ret = emw3080_hci_wifi_get_status(NULL, &status);
+    ret = emw3080_hci_wifi_get_status(dev, &status);
     if (ret == 0) {
         LOG_INF("✅ WiFi status retrieved successfully");
     } else {

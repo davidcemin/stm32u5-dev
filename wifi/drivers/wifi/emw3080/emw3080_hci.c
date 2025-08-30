@@ -97,17 +97,31 @@ int emw3080_hci_init(const struct device *dev)
 
 int emw3080_hci_init_auto(void)
 {
-    LOG_INF("Auto-initializing EMW3080 HCI layer...");
+    LOG_INF("Starting HCI auto-initialization...");
     
-    /* In test mode, initialize without requiring a device */
-    g_hci_ctx.device = NULL;  /* Acceptable for testing mode */
-    g_hci_ctx.default_timeout = EMW3080_HCI_TIMEOUT_MEDIUM;
-    k_mutex_init(&g_hci_ctx.command_mutex);
-    g_hci_ctx.initialized = true;
+    /* Try to get the EMW3080 device */
+    const struct device *dev = get_emw3080_device();
+    if (!dev) {
+        LOG_ERR("❌ EMW3080 device not found - device registration failed");
+        return -ENODEV;
+    }
     
-    LOG_INF("✅ EMW3080 HCI layer initialized in test mode");
-    LOG_INF("Note: Device is NULL - HCI commands will test protocol handling only");
+    /* Check if device is ready */
+    if (!device_is_ready(dev)) {
+        LOG_ERR("❌ EMW3080 device not ready");
+        return -ENODEV;
+    }
     
+    LOG_INF("✅ EMW3080 device found and ready: %s", dev->name);
+    
+    /* Initialize HCI layer with the device */
+    int ret = emw3080_hci_init(dev);
+    if (ret < 0) {
+        LOG_ERR("❌ HCI initialization failed: %d", ret);
+        return ret;
+    }
+    
+    LOG_INF("✅ HCI auto-initialized successfully");
     return 0;
 }
 
@@ -119,6 +133,11 @@ int emw3080_hci_send_command(const struct device *dev,
 {
     if (!g_hci_ctx.initialized) {
         LOG_ERR("HCI not initialized");
+        return -ENODEV;
+    }
+    
+    if (!dev) {
+        LOG_ERR("No device provided for HCI command");
         return -ENODEV;
     }
     
@@ -135,39 +154,9 @@ int emw3080_hci_send_command(const struct device *dev,
     /* Lock command mutex for serialization */
     k_mutex_lock(&g_hci_ctx.command_mutex, K_FOREVER);
     
-    /* In test mode (no device), simulate command processing */
-    int ret;
-    if (dev == NULL) {
-        LOG_INF("HCI Test Mode: Command cat=%02x, cmd=%02x (no hardware execution)", 
-                category, command);
-        
-        /* Simulate successful protocol handling */
-        ret = 0;
-        
-        /* Provide mock responses for specific commands */
-        if (category == EMW3080_HCI_CAT_SYSTEM && command == EMW3080_HCI_SYS_PING) {
-            if (response && response_len >= 4) {
-                /* Echo back the ping data */
-                if (params && param_len >= 4) {
-                    memcpy(response, params, 4);
-                }
-            }
-        } else if (category == EMW3080_HCI_CAT_SYSTEM && command == EMW3080_HCI_SYS_VERSION) {
-            if (response && response_len >= 16) {
-                strcpy((char *)response, "EMW3080-TEST-1.0");
-            }
-        } else if (category == EMW3080_HCI_CAT_WIFI && command == EMW3080_HCI_WIFI_GET_MAC) {
-            if (response && response_len >= 6) {
-                uint8_t *mac = (uint8_t *)response;
-                mac[0] = 0x00; mac[1] = 0x50; mac[2] = 0xC2;
-                mac[3] = 0x12; mac[4] = 0x34; mac[5] = 0x56;
-            }
-        }
-    } else {
-        /* Send real IPC command when device is available */
-        ret = emw3080_ipc_send_command(dev, api_id, params, param_len,
+    /* Send real IPC command */
+    int ret = emw3080_ipc_send_command(dev, api_id, params, param_len,
                                       response, response_len, timeout);
-    }
     
     k_mutex_unlock(&g_hci_ctx.command_mutex);
     
