@@ -19,6 +19,8 @@ target_include_directories(app PRIVATE ${ZEPHYR_BASE}/include/zephyr/drivers)
 target_sources(app PRIVATE 
     src/main.c 
     src/wifi_shell.c
+    drivers/wifi/emw3080/emw3080_mipc.c
+    drivers/wifi/emw3080/emw3080_mipc_spi.c
     drivers/wifi/emw3080/emw3080.c
     drivers/wifi/emw3080/emw3080_spi.c
     # drivers/wifi/emw3080/emw3080_ipc.c  # Temporarily in mgmt file to avoid linking issues

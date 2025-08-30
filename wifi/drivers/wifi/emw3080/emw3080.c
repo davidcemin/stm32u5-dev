@@ -199,36 +199,14 @@ void emw3080_uart_isr(const struct device *uart, void *user_data)
     return;
 }
 
-/* Implementation of send AT command function using SPI */
+/* Implementation of send AT command function - DEPRECATED: AT commands replaced by MIPC */
 int emw3080_send_at_cmd(struct emw3080_data *data, 
                       const char *cmd, size_t cmd_len,
                       char *resp_buf, size_t resp_len,
                       uint32_t timeout_ms)
 {
-    if (!data || !data->spi) {
-        LOG_ERR("Invalid data or SPI device not available");
-        return -EINVAL;
-    }
-    
-    if (!device_is_ready(data->spi)) {
-        LOG_ERR("SPI device not ready for AT commands");
-        return -ENODEV;
-    }
-    
-    LOG_DBG("Sending AT command via SPI (len=%zu, timeout=%ums): %.*s", 
-           cmd_len, timeout_ms, (int)cmd_len, cmd);
-    
-    /* Use our new SPI AT command function */
-    int ret = emw3080_spi_send_at_cmd(data->spi, cmd, cmd_len, 
-                                     resp_buf, resp_len, timeout_ms);
-    
-    if (ret == 0) {
-        LOG_DBG("AT command successful via SPI");
-    } else {
-        LOG_ERR("AT command failed via SPI: %d", ret);
-    }
-    
-    return ret;
+    LOG_ERR("AT commands are no longer supported - use MIPC protocol instead");
+    return -ENOTSUP;
 }
 
 /* Status check for EMW3080B */
