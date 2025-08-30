@@ -253,16 +253,12 @@ int emw3080_ipc_scan(const struct device *dev, enum emw3080_scan_mode mode, cons
     /* TODO: Implement SPI transaction here - for now use fallback */
     LOG_INF("EMW3080 IPC: Real hardware scan would be performed here");
     
-    /* Wait for scan to complete */
-    k_msleep(500);  /* Real scan takes time */
-    
-    LOG_INF("EMW3080 IPC: Scan simulation completed");
-    return 0;
+    LOG_ERR("EMW3080 IPC: Cannot perform real scan - hardware communication failed");
+    return -ENODEV;
 
 fallback_scan:
-    LOG_DBG("EMW3080 IPC: Using fallback scan mode");
-    k_msleep(200);
-    return 0;
+    LOG_ERR("EMW3080 IPC: Fallback scan not supported - real hardware required");
+    return -ENODEV;
 }
 
 int emw3080_ipc_get_scan_results(const struct device *dev, struct emw3080_ap_info *aps, uint8_t max_aps) {
@@ -349,7 +345,7 @@ int emw3080_ipc_get_scan_results(const struct device *dev, struct emw3080_ap_inf
     };
     
     uint8_t response[512];
-    memset(response, 0, sizeof(response));
+    memset(response, 0xFF, sizeof(response));  /* Fill with 0xFF to detect unwritten areas */
     
     /* Perform SPI transaction */
     ret = emw3080_spi_transceive(data->spi, scan_cmd, sizeof(scan_cmd), 
@@ -360,13 +356,20 @@ int emw3080_ipc_get_scan_results(const struct device *dev, struct emw3080_ap_inf
         return ret;
     }
     
-    LOG_INF("EMW3080 IPC: Successfully received scan response from hardware");
+    LOG_INF("EMW3080 IPC: SPI transaction completed - validating response...");
+    
+    /* CRITICAL: Validate response data before parsing to prevent garbage processing */
+    LOG_INF("EMW3080 IPC: Response header bytes: %02X %02X %02X %02X %02X %02X %02X %02X", 
+            response[0], response[1], response[2], response[3],
+            response[4], response[5], response[6], response[7]);
     
     /* Parse the actual response from EMW3080 */
     if (response[0] != 0x4D || response[1] != 0x58 || 
         response[2] != 0x43 || response[3] != 0x48) {
         LOG_ERR("EMW3080 IPC: Invalid response sync pattern: %02X %02X %02X %02X", 
                 response[0], response[1], response[2], response[3]);
+        LOG_ERR("EMW3080 IPC: Expected: 4D 58 43 48 (MXCH)");
+        LOG_ERR("EMW3080 IPC: This indicates SPI communication is returning garbage data");
         return -EPROTO;
     }
     
@@ -380,6 +383,17 @@ int emw3080_ipc_get_scan_results(const struct device *dev, struct emw3080_ap_inf
     if (status != 0) {
         LOG_ERR("EMW3080 IPC: Hardware scan failed with status %d", status);
         return -EIO;
+    }
+    
+    /* SAFETY: Validate network count to prevent buffer overruns and garbage processing */
+    if (network_count > max_aps) {
+        LOG_WRN("EMW3080 IPC: Hardware reported %d networks, limiting to %d", network_count, max_aps);
+        network_count = max_aps;
+    }
+    
+    if (network_count > 20) {  /* Sanity check - EMW3080 typically finds < 20 networks */
+        LOG_ERR("EMW3080 IPC: Suspicious network count %d - likely garbage data", network_count);
+        return -EPROTO;
     }
     
     if (network_count == 0) {
@@ -401,9 +415,35 @@ int emw3080_ipc_get_scan_results(const struct device *dev, struct emw3080_ap_inf
             aps[parsed_count].security = network_data[34];
             memcpy(aps[parsed_count].bssid, &network_data[35], 6);
             
-            LOG_INF("EMW3080 IPC: Real network %d: SSID='%s' Ch=%d RSSI=%d", 
-                    parsed_count, aps[parsed_count].ssid, 
-                    aps[parsed_count].channel, aps[parsed_count].rssi);
+            /* CRITICAL: Sanitize SSID data before printing to prevent terminal control characters */
+            char safe_ssid[33];
+            bool is_printable = true;
+            int ssid_len = strnlen((char *)aps[parsed_count].ssid, 32);
+            
+            /* Check if SSID contains only printable ASCII characters */
+            for (int i = 0; i < ssid_len; i++) {
+                if (aps[parsed_count].ssid[i] < 32 || aps[parsed_count].ssid[i] > 126) {
+                    is_printable = false;
+                    break;
+                }
+            }
+            
+            if (is_printable && ssid_len > 0) {
+                /* SSID is safe to print */
+                strncpy(safe_ssid, (char *)aps[parsed_count].ssid, sizeof(safe_ssid) - 1);
+                safe_ssid[sizeof(safe_ssid) - 1] = '\0';
+                
+                LOG_INF("EMW3080 IPC: Real network %d: SSID='%s' Ch=%d RSSI=%d", 
+                        parsed_count, safe_ssid, 
+                        aps[parsed_count].channel, aps[parsed_count].rssi);
+            } else {
+                /* SSID contains garbage - print as hex instead */
+                LOG_INF("EMW3080 IPC: Real network %d: SSID=[GARBAGE:%02X%02X%02X%02X...] Ch=%d RSSI=%d", 
+                        parsed_count, 
+                        aps[parsed_count].ssid[0], aps[parsed_count].ssid[1],
+                        aps[parsed_count].ssid[2], aps[parsed_count].ssid[3],
+                        aps[parsed_count].channel, aps[parsed_count].rssi);
+            }
             
             network_data += 41;
             parsed_count++;
@@ -517,7 +557,7 @@ int emw3080_send_dhcp_packet(const struct device *dev, struct net_pkt *pkt) {
     return 0;
 }
 
-/* Simulate DHCP response from the connected network */
+/* Real DHCP handling - no simulation */
 int emw3080_ipc_connect(const struct device *dev, const struct emw3080_connect_params *params) {
     LOG_INF("EMW3080 IPC: Connecting to WiFi network - ssid=%s", params ? (const char *)params->ssid : "(null)");
     
@@ -577,32 +617,14 @@ int emw3080_ipc_connect(const struct device *dev, const struct emw3080_connect_p
         connect_cmd.len = 1 + connect_cmd.ssid_len + 1 + connect_cmd.psk_len + 1;
         
         LOG_INF("EMW3080 IPC: Would send MIPC connect command for %s", params->ssid);
+        LOG_ERR("EMW3080 IPC: SPI communication required for real WiFi connection");
+        LOG_ERR("EMW3080 IPC: Cannot connect without working hardware interface");
         
-        /* For now, simulate successful connection */
-        k_msleep(1000);  /* Simulate connection time */
-        LOG_INF("EMW3080 IPC: Connection simulation completed successfully");
-        
-        /* Update connection state */
-        data->connected = true;
-        strncpy(data->ssid, params->ssid, sizeof(data->ssid) - 1);
-        data->ssid[sizeof(data->ssid) - 1] = '\0';
-        
-        return 0;
+        return -ENODEV;
     } else {
-        LOG_INF("EMW3080 IPC: SPI not ready - simulating WiFi connection to %s", params->ssid);
-        
-        /* Simulate connection */
-        k_msleep(500);
-        
-        /* Update connection state */
-        if (data) {
-            data->connected = true;
-            strncpy(data->ssid, params->ssid, sizeof(data->ssid) - 1);
-            data->ssid[sizeof(data->ssid) - 1] = '\0';
-        }
-        
-        LOG_INF("EMW3080 IPC: Simulated connection to %s completed", params->ssid);
-        return 0;
+        LOG_ERR("EMW3080 IPC: SPI not ready - cannot connect to WiFi network");
+        LOG_ERR("EMW3080 IPC: Hardware communication is required for WiFi connection");
+        return -ENODEV;
     }
 }
 
@@ -625,13 +647,8 @@ int emw3080_ipc_get_version(const struct device *dev, char *version, size_t vers
 }
 
 int emw3080_ipc_get_mac(const struct device *dev, uint8_t *mac) {
-    LOG_INF("EMW3080 IPC: Getting MAC address via real protocol");
-    if (mac) {
-        /* Simulate reading MAC from device */
-        uint8_t real_mac[6] = { 0x00, 0x80, 0xE1, 0x12, 0x34, 0x56 };
-        memcpy(mac, real_mac, 6);
-    }
-    return 0;
+    LOG_ERR("EMW3080 IPC: Cannot get MAC address - SPI communication required");
+    return -ENODEV;
 }
 
 int emw3080_ipc_set_bypass_mode(const struct device *dev, bool enabled) {

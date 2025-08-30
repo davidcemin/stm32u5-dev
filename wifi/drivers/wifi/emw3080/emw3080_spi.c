@@ -443,7 +443,25 @@ int emw3080_spi_send_at_cmd_enhanced(const struct device *spi_dev,
         memcpy(response_str, rx_buffer, copy_len);
         response_str[copy_len] = '\0';
         
-        LOG_INF("EMW3080 SPI: Response string: '%s'", response_str);
+        /* CRITICAL: Sanitize response string to prevent terminal control characters */
+        bool is_printable = true;
+        for (size_t i = 0; i < copy_len; i++) {
+            if (response_str[i] < 32 || response_str[i] > 126) {
+                if (response_str[i] != '\r' && response_str[i] != '\n' && response_str[i] != '\t') {
+                    is_printable = false;
+                    break;
+                }
+            }
+        }
+        
+        if (is_printable) {
+            LOG_INF("EMW3080 SPI: Response string: '%s'", response_str);
+        } else {
+            /* Print first few bytes as hex instead of potentially dangerous string */
+            LOG_INF("EMW3080 SPI: Response data (binary): %02X %02X %02X %02X %02X %02X %02X %02X... (%zu bytes)", 
+                    rx_buffer[0], rx_buffer[1], rx_buffer[2], rx_buffer[3],
+                    rx_buffer[4], rx_buffer[5], rx_buffer[6], rx_buffer[7], copy_len);
+        }
         
         /* Check for success indicators */
         if (strstr(response_str, "OK") || strstr(response_str, "+CWLAP:")) {
@@ -546,7 +564,25 @@ int emw3080_spi_init(const struct device *spi_dev)
                                response.data_len : sizeof(preview) - 1;
             memcpy(preview, response.data, preview_len);
             preview[preview_len] = '\0';
-            LOG_INF("  Data preview: %s", preview);
+            
+            /* CRITICAL: Sanitize preview data to prevent terminal control characters */
+            bool is_printable = true;
+            for (size_t i = 0; i < preview_len; i++) {
+                if (preview[i] < 32 || preview[i] > 126) {
+                    if (preview[i] != '\r' && preview[i] != '\n' && preview[i] != '\t') {
+                        is_printable = false;
+                        break;
+                    }
+                }
+            }
+            
+            if (is_printable) {
+                LOG_INF("  Data preview: %s", preview);
+            } else {
+                LOG_INF("  Data preview (binary): %02X %02X %02X %02X... (%zu bytes)", 
+                        ((uint8_t*)response.data)[0], ((uint8_t*)response.data)[1],
+                        ((uint8_t*)response.data)[2], ((uint8_t*)response.data)[3], response.data_len);
+            }
         }
         
         if (response.type == EMW3080_RESP_TYPE_OK || 
@@ -568,7 +604,26 @@ int emw3080_spi_init(const struct device *spi_dev)
         ret = emw3080_spi_send_at_cmd(spi_dev, test_cmd, strlen(test_cmd), 
                                      basic_response, sizeof(basic_response), 2000);
         if (ret == 0) {
-            LOG_INF("Basic SPI communication working: %s", basic_response);
+            /* CRITICAL: Sanitize basic response to prevent terminal control characters */
+            bool is_printable = true;
+            size_t resp_len = strnlen(basic_response, sizeof(basic_response) - 1);
+            
+            for (size_t i = 0; i < resp_len; i++) {
+                if (basic_response[i] < 32 || basic_response[i] > 126) {
+                    if (basic_response[i] != '\r' && basic_response[i] != '\n' && basic_response[i] != '\t') {
+                        is_printable = false;
+                        break;
+                    }
+                }
+            }
+            
+            if (is_printable) {
+                LOG_INF("Basic SPI communication working: %s", basic_response);
+            } else {
+                LOG_INF("Basic SPI communication working (binary response): %02X %02X %02X %02X... (%zu bytes)", 
+                        (uint8_t)basic_response[0], (uint8_t)basic_response[1], 
+                        (uint8_t)basic_response[2], (uint8_t)basic_response[3], resp_len);
+            }
         } else {
             LOG_WRN("Basic SPI test also failed (%d), but continuing", ret);
         }
