@@ -107,9 +107,6 @@ static void emw3080_iface_init(struct net_if *iface)
            net_if_flag_is_set(iface, NET_IF_RUNNING));
 }
 
-/* Forward declaration of the work handler */
-static void emw3080_request_handler(struct k_work *work);
-
 /* Driver initialization - SPI version */
 static int emw3080_init(const struct device *dev)
 {
@@ -252,17 +249,6 @@ void emw3080_parse_ip_info(struct emw3080_data *data, char *resp)
 }
 
 /* Work queue handler for asynchronous processing */
-static void emw3080_request_handler(struct k_work *work)
-{
-    struct emw3080_data *data = CONTAINER_OF(work, struct emw3080_data, request_work);
-    char resp[64];
-    
-    /* Process queued requests - example: check connection status */
-    if (emw3080_send_at_cmd(data, "AT+CIPSTATUS\r\n", 13, resp, sizeof(resp), 1000) == 0) {
-        /* Process connection status response */
-        LOG_INF("Connection status: %s", resp);
-    }
-}
 
 /* Get the type of offloaded network interface */
 static enum offloaded_net_if_types emw3080_get_type(void)

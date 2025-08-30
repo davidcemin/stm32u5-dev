@@ -128,17 +128,6 @@ int emw3080_ipc_init(const struct device *dev) {
                 LOG_ERR("EMW3080 IPC: SPI device has no API");
             }
             
-            /* Try to access the SPI configuration */
-            struct spi_config spi_cfg = {
-                .frequency = 1000000,  /* 1 MHz for testing */
-                .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB,
-                .slave = 0,
-                .cs = {
-                    .gpio = GPIO_DT_SPEC_INST_GET_OR(0, cs_gpios, {0}),
-                    .delay = 0,
-                },
-            };
-            
             LOG_INF("EMW3080 IPC: Attempting basic SPI test configuration");
         }
         

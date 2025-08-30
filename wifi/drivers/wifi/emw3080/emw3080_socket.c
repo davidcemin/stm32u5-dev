@@ -27,11 +27,6 @@ extern int emw3080_send_at_cmd(struct emw3080_data *data,
                               uint32_t timeout_ms);
 
 /* Convert IPv4 address to string format */
-static void ipv4_addr_to_str(const uint8_t *addr, char *str, size_t size)
-{
-    snprintf(str, size, "%d.%d.%d.%d", addr[0], addr[1], addr[2], addr[3]);
-}
-
 /* Check if a packet is DHCP */
 static bool is_dhcp_packet(struct net_pkt *pkt)
 {
@@ -71,17 +66,6 @@ static bool is_dhcp_packet(struct net_pkt *pkt)
     }
     
     return false;
-}
-
-/* Find a free socket */
-static int emw3080_get_free_socket(struct emw3080_data *data)
-{
-    for (int i = 0; i < EMW3080_MAX_CONNECTIONS; i++) {
-        if (!data->sockets[i].in_use) {
-            return i;
-        }
-    }
-    return -1;  /* No free sockets */
 }
 
 /* This function is called when a packet needs to be sent */

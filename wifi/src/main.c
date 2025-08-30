@@ -162,23 +162,20 @@ static struct net_if *get_wifi_iface(void)
                 /* MANUALLY REGISTER OFFLOAD API - Since automatic isn't working */
                 LOG_ERR("MANUAL OFFLOAD REGISTRATION: Registering offload API for interface %p", iface);
                 
-                /* Cast away const to set the offload API */
-                struct net_if_dev *if_dev = (struct net_if_dev *)iface->if_dev;
-                if_dev->offload = &emw3080_offload;
-                
-                /* Check if registration worked */
+                /* Check if offload API is properly set */
+                LOG_INF("MANUAL OFFLOAD CHECK: Checking if offload is working");
                 bool is_offloaded = net_if_is_offloaded(iface);
-                LOG_ERR("MANUAL OFFLOAD REGISTRATION: Interface is_offloaded: %d", is_offloaded);
+                LOG_ERR("MANUAL OFFLOAD CHECK: Interface is_offloaded: %d", is_offloaded);
                 
                 if (is_offloaded) {
                     const struct net_offload *offload_api = net_if_offload(iface);
                     if (offload_api) {
-                        LOG_ERR("MANUAL OFFLOAD REGISTRATION: SUCCESS! API registered - send: %p", offload_api->send);
+                        LOG_ERR("MANUAL OFFLOAD CHECK: SUCCESS! API registered - send: %p", offload_api->send);
                     } else {
-                        LOG_ERR("MANUAL OFFLOAD REGISTRATION: FAILED - No API despite being offloaded");
+                        LOG_ERR("MANUAL OFFLOAD CHECK: FAILED - No API despite being offloaded");
                     }
                 } else {
-                    LOG_ERR("MANUAL OFFLOAD REGISTRATION: FAILED - Interface not marked as offloaded");
+                    LOG_ERR("MANUAL OFFLOAD CHECK: FAILED - Interface not marked as offloaded");
                 }
                 
                 /* Check what L2 layer is assigned */

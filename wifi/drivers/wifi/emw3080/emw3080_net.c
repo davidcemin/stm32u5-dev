@@ -140,9 +140,14 @@ static void emw3080_net_iface_init(struct net_if *iface)
            iface, net_if_get_by_iface(iface));
     
     /* CRITICAL: Register the network offload API using the proper Zephyr method */
-    LOG_INF("EMW3080: Registering network offload API");
-    /* Cast away const to set the offload API - this is how it's done in Zephyr examples */
-    ((struct net_if_dev *)iface->if_dev)->offload = &emw3080_offload;
+    LOG_INF("EMW3080: Interface initialization - offload API should be automatically set");
+    
+    /* Check if offload API is properly set by NET_DEVICE_OFFLOAD_INIT */
+    if (net_if_is_offloaded(iface)) {
+        LOG_INF("EMW3080: Offload API successfully set by NET_DEVICE_OFFLOAD_INIT");
+    } else {
+        LOG_ERR("EMW3080: Offload API not set - check NET_DEVICE_OFFLOAD_INIT configuration");
+    }
     
     /* CRITICAL: Set the offload flags to ensure packets go through offload path */
     LOG_INF("EMW3080: Setting offload flags");
@@ -244,10 +249,13 @@ static void emw3080_net_iface_init(struct net_if *iface)
         LOG_ERR("EMW3080: FAILED - Interface is not marked as offloaded!");
         LOG_ERR("EMW3080: This means packets will try to use L2 send (which doesn't exist)");
         
-        /* Force-set the offload API again with more aggressive approach */
-        LOG_INF("EMW3080: Attempting force registration of offload API");
-        struct net_if_dev *if_dev = (struct net_if_dev *)iface->if_dev;
-        if_dev->offload = &emw3080_offload;
+        /* Check if offload API is working */
+        LOG_INF("EMW3080: Checking offload API status");
+        if (net_if_is_offloaded(iface)) {
+            LOG_INF("EMW3080: Offload API is working correctly");
+        } else {
+            LOG_ERR("EMW3080: Offload API is not working - packets may not be processed correctly");
+        }
         
         /* Double-check if it worked */
         is_offloaded = net_if_is_offloaded(iface);
