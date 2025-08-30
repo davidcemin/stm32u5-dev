@@ -894,6 +894,85 @@ static int cmd_wifi_diagnose(const struct shell *sh, size_t argc, char *argv[])
     return 0;
 }
 
+/* SPI register test command */
+static int cmd_spi_test(const struct shell *sh, size_t argc, char **argv)
+{
+    shell_fprintf(sh, SHELL_NORMAL, "EMW3080 SPI Register Test\n");
+    shell_fprintf(sh, SHELL_NORMAL, "========================\n");
+    
+    /* Get the SPI device directly */
+    const struct device *spi_dev = device_get_binding("spi@40003800");
+    if (!spi_dev) {
+        shell_fprintf(sh, SHELL_ERROR, "ERROR: Cannot find SPI device spi@40003800\n");
+        return -ENODEV;
+    }
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Found SPI device: %s\n", spi_dev->name);
+    shell_fprintf(sh, SHELL_NORMAL, "SPI device ready: %s\n", device_is_ready(spi_dev) ? "YES" : "NO");
+    
+    if (!device_is_ready(spi_dev)) {
+        shell_fprintf(sh, SHELL_ERROR, "ERROR: SPI device not ready\n");
+        return -ENODEV;
+    }
+    
+    /* Include the SPI functions */
+    extern int emw3080_spi_transceive(const struct device *spi_dev, 
+                                     const void *tx_buf, size_t tx_len,
+                                     void *rx_buf, size_t rx_len);
+    
+    /* Test 1: Basic SPI communication test */
+    shell_fprintf(sh, SHELL_NORMAL, "\nTest 1: Basic SPI Ping Test\n");
+    shell_fprintf(sh, SHELL_NORMAL, "----------------------------\n");
+    
+    uint8_t tx_test[4] = {0xAA, 0x55, 0xFF, 0x00};  /* Test pattern */
+    uint8_t rx_test[4] = {0};
+    
+    int ret = emw3080_spi_transceive(spi_dev, tx_test, sizeof(tx_test), rx_test, sizeof(rx_test));
+    
+    shell_fprintf(sh, SHELL_NORMAL, "TX: %02X %02X %02X %02X\n", 
+                  tx_test[0], tx_test[1], tx_test[2], tx_test[3]);
+    shell_fprintf(sh, SHELL_NORMAL, "RX: %02X %02X %02X %02X\n", 
+                  rx_test[0], rx_test[1], rx_test[2], rx_test[3]);
+    shell_fprintf(sh, SHELL_NORMAL, "Result: %s (%d)\n", ret == 0 ? "SUCCESS" : "FAILED", ret);
+    
+    /* Test 2: EMW3080 Status Register Read */
+    shell_fprintf(sh, SHELL_NORMAL, "\nTest 2: EMW3080 Status Register\n");
+    shell_fprintf(sh, SHELL_NORMAL, "-------------------------------\n");
+    
+    uint8_t status_cmd = 0x04;  /* EMW3080_SPI_STATUS_CMD */
+    uint8_t status_val = 0;
+    
+    ret = emw3080_spi_transceive(spi_dev, &status_cmd, 1, &status_val, 1);
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Status CMD: 0x%02X\n", status_cmd);
+    shell_fprintf(sh, SHELL_NORMAL, "Status VAL: 0x%02X\n", status_val);
+    shell_fprintf(sh, SHELL_NORMAL, "Result: %s (%d)\n", ret == 0 ? "SUCCESS" : "FAILED", ret);
+    
+    if (ret == 0) {
+        shell_fprintf(sh, SHELL_NORMAL, "Status Decode:\n");
+        shell_fprintf(sh, SHELL_NORMAL, "  Ready: %s (bit 0)\n", 
+                      (status_val & 0x01) ? "NOT READY" : "READY");
+        shell_fprintf(sh, SHELL_NORMAL, "  Data Available: %s (bit 1)\n", 
+                      (status_val & 0x02) ? "YES" : "NO");
+        shell_fprintf(sh, SHELL_NORMAL, "  Busy: %s (bit 2)\n", 
+                      (status_val & 0x04) ? "YES" : "NO");
+    }
+    
+    /* Test 3: Multiple Status Reads */
+    shell_fprintf(sh, SHELL_NORMAL, "\nTest 3: Multiple Status Reads\n");
+    shell_fprintf(sh, SHELL_NORMAL, "-----------------------------\n");
+    
+    for (int i = 0; i < 5; i++) {
+        ret = emw3080_spi_transceive(spi_dev, &status_cmd, 1, &status_val, 1);
+        shell_fprintf(sh, SHELL_NORMAL, "Read %d: 0x%02X (%s)\n", 
+                      i+1, status_val, ret == 0 ? "OK" : "FAIL");
+        k_msleep(100);  /* Wait between reads */
+    }
+    
+    shell_fprintf(sh, SHELL_NORMAL, "\nSPI Test Complete\n");
+    return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(wifi_cmds,
     SHELL_CMD(scan, NULL, "Scan for Wi-Fi networks", cmd_wifi_scan),
     SHELL_CMD(connect, NULL, "Connect: wifi connect <SSID> <PSK> [security_type]", cmd_wifi_connect),
@@ -904,6 +983,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(wifi_cmds,
     SHELL_CMD(ip, NULL, "Configure static IP: wifi ip set <ip> <netmask> <gw>", cmd_wifi_ip),
     SHELL_CMD(ping, NULL, "Network test: wifi ping <ip/hostname>", cmd_wifi_ping),
     SHELL_CMD(diagnose, NULL, "Run network diagnostics", cmd_wifi_diagnose),
+    SHELL_CMD(spitest, NULL, "Test SPI communication with EMW3080", cmd_spi_test),
     SHELL_SUBCMD_SET_END
 );
 

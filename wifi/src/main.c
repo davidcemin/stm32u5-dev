@@ -159,37 +159,20 @@ static struct net_if *get_wifi_iface(void)
             if (dev == emw3080_net) {
                 LOG_INF("Found EMW3080 network interface");
                 
-                /* MANUALLY REGISTER OFFLOAD API - Since automatic isn't working */
-                LOG_ERR("MANUAL OFFLOAD REGISTRATION: Registering offload API for interface %p", iface);
-                
-                /* Check if offload API is properly set */
-                LOG_INF("MANUAL OFFLOAD CHECK: Checking if offload is working");
+                /* Check if offload API is properly set up by NET_DEVICE_OFFLOAD_INIT */
                 bool is_offloaded = net_if_is_offloaded(iface);
-                LOG_ERR("MANUAL OFFLOAD CHECK: Interface is_offloaded: %d", is_offloaded);
+                LOG_INF("EMW3080: Interface offload status: %s", is_offloaded ? "ENABLED" : "DISABLED");
                 
                 if (is_offloaded) {
                     const struct net_offload *offload_api = net_if_offload(iface);
-                    if (offload_api) {
-                        LOG_ERR("MANUAL OFFLOAD CHECK: SUCCESS! API registered - send: %p", offload_api->send);
+                    if (offload_api && offload_api->send) {
+                        LOG_INF("EMW3080: Offload API properly initialized - send: %p", offload_api->send);
                     } else {
-                        LOG_ERR("MANUAL OFFLOAD CHECK: FAILED - No API despite being offloaded");
+                        LOG_WRN("EMW3080: Offload enabled but API not available");
                     }
                 } else {
-                    LOG_ERR("MANUAL OFFLOAD CHECK: FAILED - Interface not marked as offloaded");
+                    LOG_WRN("EMW3080: Interface not marked as offloaded - check NET_DEVICE_OFFLOAD_INIT");
                 }
-                
-                /* Check what L2 layer is assigned */
-                const struct net_l2 *l2_layer = net_if_l2(iface);
-                LOG_ERR("MANUAL OFFLOAD REGISTRATION: Current L2 layer: %p", l2_layer);
-                if (l2_layer) {
-                    LOG_ERR("MANUAL OFFLOAD REGISTRATION: L2 send function: %p", l2_layer->send);
-                }
-                
-                /* Double-check in a few milliseconds to ensure it persists */
-                k_msleep(100);
-                
-                bool still_offloaded = net_if_is_offloaded(iface);
-                LOG_ERR("MANUAL OFFLOAD REGISTRATION: After 100ms, still_offloaded: %d", still_offloaded);
                 
                 return iface;
             }
@@ -367,18 +350,8 @@ int main(void)
         if (is_emw3080) {
             LOG_INF("==== EMW3080 WiFi interface ready! ====");
             
-            /* Initialize the EMW3080 L2 layer */
-            LOG_INF("Initializing the EMW3080 L2 layer");
-            extern void emw3080_l2_init(void);
-            emw3080_l2_init();
-            
-            /* Attach L2 to interface */
-            LOG_INF("Attaching EMW3080 L2 to interface");
-            extern int emw3080_attach_l2_to_iface(struct net_if *iface);
-            ret = emw3080_attach_l2_to_iface(iface);
-            if (ret) {
-                LOG_ERR("Failed to attach L2 to interface: %d", ret);
-            }
+            /* For offload devices, the networking is handled by the offload API
+             * We don't need to manually attach L2 layers - NET_DEVICE_OFFLOAD_INIT handles this */
             
             /* Configure IPv4 for the interface */
             LOG_INF("Setting up IPv4 configuration");
@@ -394,9 +367,8 @@ int main(void)
                 LOG_INF("Interface is already up");
             }
             
-            /* Configure IPv4 - use DHCP by default */
-            LOG_INF("Starting DHCP client for automatic IP configuration");
-            start_dhcp_for_interface(iface);
+            /* Don't start DHCP here - wait until we're connected to a WiFi network */
+            LOG_INF("DHCP will be started automatically when connected to WiFi network");
         } else {
             LOG_WRN("Using non-EMW3080 interface: %s", dev ? dev->name : "unknown");
             LOG_WRN("WiFi functionality may be limited");
