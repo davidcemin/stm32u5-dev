@@ -27,7 +27,7 @@ static struct spi_config emw3080_spi_cfg = {
 static K_MUTEX_DEFINE(spi_mutex);
 
 /* Wait for EMW3080B to be ready for communication */
-static int emw3080_spi_wait_ready(const struct device *spi_dev, uint32_t timeout_ms)
+int emw3080_spi_wait_ready(const struct device *spi_dev, uint32_t timeout_ms)
 {
     uint8_t status_cmd = EMW3080_SPI_STATUS_CMD;
     uint8_t status = 0;
