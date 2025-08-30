@@ -6,35 +6,19 @@
 #include <zephyr/net/offloaded_netdev.h>
 #include <zephyr/net/dhcpv4.h>
 #include <zephyr/net/net_ip.h>
+#include <zephyr/drivers/gpio.h>
 #include <string.h>
 
 /* Include the EMW3080 management header directly to access its API */
 #include "../drivers/wifi/emw3080/emw3080_mgmt.h"
+#include "../drivers/wifi/emw3080/emw3080.h"
 
-/* Helper function to get the EMW3080 device directly */
-static const struct device *get_emw3080_device(void)
-{
-    /* Look for a device with EMW3080 in the name */
-    int i = 0;
-    
-    for (i = 0; i < CONFIG_NET_IF_MAX_IPV4_COUNT; i++) {
-        struct net_if *tmp = net_if_get_by_index(i);
-        if (!tmp) {
-            continue;
-        }
-        
-        const struct device *dev = net_if_get_device(tmp);
-        if (!dev) {
-            continue;
-        }
-        
-        if (dev->name && strstr(dev->name, "EMW3080") != NULL) {
-            return dev;  /* Return the device directly */
-        }
-    }
-    
-    return NULL;  /* No EMW3080 device found */
-}
+/* Include MIPC protocol support */
+#include <zephyr/shell/shell.h>
+#include <zephyr/logging/log.h>
+
+#include "../drivers/wifi/emw3080/emw3080_mipc.h"
+#include "../drivers/wifi/emw3080/emw3080_mipc_spi.h"
 
 /* Helper function to get Wi-Fi interface - ULTRA SAFE IMPLEMENTATION */
 static struct net_if *get_wifi_iface(void)
@@ -894,6 +878,254 @@ static int cmd_wifi_diagnose(const struct shell *sh, size_t argc, char *argv[])
     return 0;
 }
 
+/* SPI register test command */
+static int cmd_spi_test(const struct shell *sh, size_t argc, char **argv)
+{
+    shell_fprintf(sh, SHELL_NORMAL, "EMW3080 SPI Register Test\n");
+    shell_fprintf(sh, SHELL_NORMAL, "========================\n");
+    
+    /* Get the SPI device directly */
+    const struct device *spi_dev = device_get_binding("spi@40003800");
+    if (!spi_dev) {
+        shell_fprintf(sh, SHELL_ERROR, "ERROR: Cannot find SPI device spi@40003800\n");
+        return -ENODEV;
+    }
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Found SPI device: %s\n", spi_dev->name);
+    shell_fprintf(sh, SHELL_NORMAL, "SPI device ready: %s\n", device_is_ready(spi_dev) ? "YES" : "NO");
+    
+    if (!device_is_ready(spi_dev)) {
+        shell_fprintf(sh, SHELL_ERROR, "ERROR: SPI device not ready\n");
+        return -ENODEV;
+    }
+    
+    /* Include the SPI functions */
+    extern int emw3080_spi_transceive(const struct device *spi_dev, 
+                                     const void *tx_buf, size_t tx_len,
+                                     void *rx_buf, size_t rx_len);
+    
+    /* Test 1: Basic SPI communication test */
+    shell_fprintf(sh, SHELL_NORMAL, "\nTest 1: Basic SPI Ping Test\n");
+    shell_fprintf(sh, SHELL_NORMAL, "----------------------------\n");
+    
+    uint8_t tx_test[4] = {0xAA, 0x55, 0xFF, 0x00};  /* Test pattern */
+    uint8_t rx_test[4] = {0};
+    
+    int ret = emw3080_spi_transceive(spi_dev, tx_test, sizeof(tx_test), rx_test, sizeof(rx_test));
+    
+    shell_fprintf(sh, SHELL_NORMAL, "TX: %02X %02X %02X %02X\n", 
+                  tx_test[0], tx_test[1], tx_test[2], tx_test[3]);
+    shell_fprintf(sh, SHELL_NORMAL, "RX: %02X %02X %02X %02X\n", 
+                  rx_test[0], rx_test[1], rx_test[2], rx_test[3]);
+    shell_fprintf(sh, SHELL_NORMAL, "Result: %s (%d)\n", ret == 0 ? "SUCCESS" : "FAILED", ret);
+    
+    /* Test 2: EMW3080 Status Register Read */
+    shell_fprintf(sh, SHELL_NORMAL, "\nTest 2: EMW3080 Status Register\n");
+    shell_fprintf(sh, SHELL_NORMAL, "-------------------------------\n");
+    
+    uint8_t status_cmd = 0x04;  /* EMW3080_SPI_STATUS_CMD */
+    uint8_t status_val = 0;
+    
+    ret = emw3080_spi_transceive(spi_dev, &status_cmd, 1, &status_val, 1);
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Status CMD: 0x%02X\n", status_cmd);
+    shell_fprintf(sh, SHELL_NORMAL, "Status VAL: 0x%02X\n", status_val);
+    shell_fprintf(sh, SHELL_NORMAL, "Result: %s (%d)\n", ret == 0 ? "SUCCESS" : "FAILED", ret);
+    
+    if (ret == 0) {
+        shell_fprintf(sh, SHELL_NORMAL, "Status Decode:\n");
+        shell_fprintf(sh, SHELL_NORMAL, "  Ready: %s (bit 0)\n", 
+                      (status_val & 0x01) ? "NOT READY" : "READY");
+        shell_fprintf(sh, SHELL_NORMAL, "  Data Available: %s (bit 1)\n", 
+                      (status_val & 0x02) ? "YES" : "NO");
+        shell_fprintf(sh, SHELL_NORMAL, "  Busy: %s (bit 2)\n", 
+                      (status_val & 0x04) ? "YES" : "NO");
+    }
+    
+    /* Test 3: Multiple Status Reads */
+    shell_fprintf(sh, SHELL_NORMAL, "\nTest 3: Multiple Status Reads\n");
+    shell_fprintf(sh, SHELL_NORMAL, "-----------------------------\n");
+    
+    for (int i = 0; i < 5; i++) {
+        ret = emw3080_spi_transceive(spi_dev, &status_cmd, 1, &status_val, 1);
+        shell_fprintf(sh, SHELL_NORMAL, "Read %d: 0x%02X (%s)\n", 
+                      i+1, status_val, ret == 0 ? "OK" : "FAIL");
+        k_msleep(100);  /* Wait between reads */
+    }
+    
+    shell_fprintf(sh, SHELL_NORMAL, "\nSPI Test Complete\n");
+    return 0;
+}
+
+/* MIPC test commands */
+static int cmd_mipc_init(const struct shell *sh, size_t argc, char **argv)
+{
+    shell_fprintf(sh, SHELL_NORMAL, "Initializing MIPC protocol over SPI...\n");
+    
+    int ret = emw3080_mipc_spi_init();
+    if (ret == 0) {
+        shell_fprintf(sh, SHELL_NORMAL, "MIPC initialization successful\n");
+    } else {
+        shell_fprintf(sh, SHELL_ERROR, "MIPC initialization failed: %d\n", ret);
+    }
+    
+    return ret;
+}
+
+static int cmd_mipc_echo(const struct shell *sh, size_t argc, char **argv)
+{
+    if (argc < 2) {
+        shell_fprintf(sh, SHELL_ERROR, "Usage: wifi mipcecho <test_string>\n");
+        return -EINVAL;
+    }
+    
+    const char *test_string = argv[1];
+    uint8_t response_buffer[256];
+    uint16_t response_size = sizeof(response_buffer);
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Testing MIPC echo with: '%s'\n", test_string);
+    
+    int ret = mipc_echo((uint8_t *)test_string, strlen(test_string),
+                       response_buffer, &response_size, 5000);
+    
+    if (ret == MIPC_CODE_SUCCESS) {
+        shell_fprintf(sh, SHELL_NORMAL, "MIPC echo successful, received %d bytes:\n", response_size);
+        
+        /* Print response as string if printable */
+        bool printable = true;
+        for (int i = 0; i < response_size; i++) {
+            if (response_buffer[i] < 32 || response_buffer[i] > 126) {
+                printable = false;
+                break;
+            }
+        }
+        
+        if (printable && response_size > 0) {
+            response_buffer[response_size] = '\0';
+            shell_fprintf(sh, SHELL_NORMAL, "Response: '%s'\n", response_buffer);
+        } else {
+            shell_fprintf(sh, SHELL_NORMAL, "Response (hex): ");
+            for (int i = 0; i < response_size; i++) {
+                shell_fprintf(sh, SHELL_NORMAL, "%02x ", response_buffer[i]);
+            }
+            shell_fprintf(sh, SHELL_NORMAL, "\n");
+        }
+    } else {
+        shell_fprintf(sh, SHELL_ERROR, "MIPC echo failed: %d\n", ret);
+    }
+    
+    return ret == MIPC_CODE_SUCCESS ? 0 : -1;
+}
+
+static int cmd_mipc_version(const struct shell *sh, size_t argc, char **argv)
+{
+    uint8_t response_buffer[256];
+    uint16_t response_size = sizeof(response_buffer);
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Getting system version via MIPC...\n");
+    
+    int ret = mipc_request(MIPC_API_SYS_VERSION_CMD, NULL, 0,
+                          response_buffer, &response_size, 5000);
+    
+    if (ret == MIPC_CODE_SUCCESS) {
+        shell_fprintf(sh, SHELL_NORMAL, "Version request successful, received %d bytes:\n", response_size);
+        
+        /* Print response as hex and try as string */
+        shell_fprintf(sh, SHELL_NORMAL, "Response (hex): ");
+        for (int i = 0; i < response_size; i++) {
+            shell_fprintf(sh, SHELL_NORMAL, "%02x ", response_buffer[i]);
+        }
+        shell_fprintf(sh, SHELL_NORMAL, "\n");
+        
+        /* Try to interpret as string */
+        if (response_size > 0) {
+            shell_fprintf(sh, SHELL_NORMAL, "Response (string): ");
+            for (int i = 0; i < response_size; i++) {
+                char c = response_buffer[i];
+                shell_fprintf(sh, SHELL_NORMAL, "%c", (c >= 32 && c <= 126) ? c : '.');
+            }
+            shell_fprintf(sh, SHELL_NORMAL, "\n");
+        }
+    } else {
+        shell_fprintf(sh, SHELL_ERROR, "Version request failed: %d\n", ret);
+    }
+    
+    return ret == MIPC_CODE_SUCCESS ? 0 : -1;
+}
+
+static int cmd_mipc_getmac(const struct shell *sh, size_t argc, char **argv)
+{
+    uint8_t response_buffer[256];
+    uint16_t response_size = sizeof(response_buffer);
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Getting MAC address via MIPC...\n");
+    
+    int ret = mipc_request(MIPC_API_WIFI_GET_MAC_CMD, NULL, 0,
+                          response_buffer, &response_size, 5000);
+    
+    if (ret == MIPC_CODE_SUCCESS) {
+        shell_fprintf(sh, SHELL_NORMAL, "MAC request successful, received %d bytes:\n", response_size);
+        
+        /* Print response as hex */
+        shell_fprintf(sh, SHELL_NORMAL, "Response (hex): ");
+        for (int i = 0; i < response_size; i++) {
+            shell_fprintf(sh, SHELL_NORMAL, "%02x ", response_buffer[i]);
+        }
+        shell_fprintf(sh, SHELL_NORMAL, "\n");
+        
+        /* If we received 6 bytes, interpret as MAC address */
+        if (response_size >= 6) {
+            shell_fprintf(sh, SHELL_NORMAL, "MAC Address: %02x:%02x:%02x:%02x:%02x:%02x\n",
+                         response_buffer[0], response_buffer[1], response_buffer[2],
+                         response_buffer[3], response_buffer[4], response_buffer[5]);
+        }
+    } else {
+        shell_fprintf(sh, SHELL_ERROR, "MAC request failed: %d\n", ret);
+    }
+    
+    return ret == MIPC_CODE_SUCCESS ? 0 : -1;
+}
+
+static int cmd_mipc_poll(const struct shell *sh, size_t argc, char **argv)
+{
+    shell_fprintf(sh, SHELL_NORMAL, "Polling for MIPC responses...\n");
+    emw3080_mipc_spi_poll();
+    shell_fprintf(sh, SHELL_NORMAL, "Poll completed\n");
+    return 0;
+}
+
+static int cmd_emw3080_reset(const struct shell *sh, size_t argc, char **argv)
+{
+    shell_fprintf(sh, SHELL_NORMAL, "Resetting EMW3080 module...\n");
+    
+    /* Get the WiFi device */
+    const struct device *wifi_dev = get_emw3080_device();
+    if (!wifi_dev || !device_is_ready(wifi_dev)) {
+        shell_fprintf(sh, SHELL_ERROR, "WiFi device not ready\n");
+        return -1;
+    }
+    
+    /* Get the device data to access reset GPIO */
+    struct emw3080_data *data = wifi_dev->data;
+    
+    if (!data->reset_gpio.port) {
+        shell_fprintf(sh, SHELL_ERROR, "Reset GPIO not configured\n");
+        return -1;
+    }
+    
+    /* Perform hardware reset */
+    shell_fprintf(sh, SHELL_NORMAL, "Asserting reset (active low)...\n");
+    gpio_pin_set_dt(&data->reset_gpio, 1); /* Assert reset (active low means high = reset) */
+    k_sleep(K_MSEC(200));                  /* Hold in reset */
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Releasing reset...\n");
+    gpio_pin_set_dt(&data->reset_gpio, 0); /* Release reset */
+    k_sleep(K_MSEC(500));                  /* Allow time to boot */
+    
+    shell_fprintf(sh, SHELL_NORMAL, "EMW3080 reset completed\n");
+    return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(wifi_cmds,
     SHELL_CMD(scan, NULL, "Scan for Wi-Fi networks", cmd_wifi_scan),
     SHELL_CMD(connect, NULL, "Connect: wifi connect <SSID> <PSK> [security_type]", cmd_wifi_connect),
@@ -904,6 +1136,13 @@ SHELL_STATIC_SUBCMD_SET_CREATE(wifi_cmds,
     SHELL_CMD(ip, NULL, "Configure static IP: wifi ip set <ip> <netmask> <gw>", cmd_wifi_ip),
     SHELL_CMD(ping, NULL, "Network test: wifi ping <ip/hostname>", cmd_wifi_ping),
     SHELL_CMD(diagnose, NULL, "Run network diagnostics", cmd_wifi_diagnose),
+    SHELL_CMD(spitest, NULL, "Test SPI communication with EMW3080", cmd_spi_test),
+    SHELL_CMD(reset, NULL, "Reset EMW3080 module", cmd_emw3080_reset),
+    SHELL_CMD(mipc_init, NULL, "Initialize MIPC protocol", cmd_mipc_init),
+    SHELL_CMD(mipcecho, NULL, "Test MIPC echo: wifi mipcecho <string>", cmd_mipc_echo),
+    SHELL_CMD(mipcver, NULL, "Get system version via MIPC", cmd_mipc_version),
+    SHELL_CMD(mipcmac, NULL, "Get MAC address via MIPC", cmd_mipc_getmac),
+    SHELL_CMD(mipcpoll, NULL, "Poll for MIPC responses", cmd_mipc_poll),
     SHELL_SUBCMD_SET_END
 );
 

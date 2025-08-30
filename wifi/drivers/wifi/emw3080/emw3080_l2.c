@@ -20,6 +20,7 @@ LOG_MODULE_REGISTER(emw3080_l2, CONFIG_LOG_DEFAULT_LEVEL);
 #include "emw3080_mgmt.h"
 #include "emw3080_socket.h"
 #include "emw3080_offload.h"
+#include "emw3080_spi.h"
 
 /* Define a dummy MAC address for now */
 static uint8_t emw3080_mac_addr[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
@@ -100,22 +101,9 @@ static int emw3080_l2_send(struct net_if *iface, struct net_pkt *pkt)
                                ntohs(udp_hdr.src_port), ntohs(udp_hdr.dst_port));
                         is_dhcp = true;
                         
-                        /* Set up a static IP address (192.168.1.100) */
-                        struct in_addr addr = { .s_addr = htonl(0xC0A80164) };  /* 192.168.1.100 */
-                        struct in_addr netmask_addr = { .s_addr = htonl(0xFFFFFF00) };  /* 255.255.255.0 */
-                        struct in_addr gw_addr = { .s_addr = htonl(0xC0A80101) };  /* 192.168.1.1 */
-                        
-                        /* Add the IP address to the interface */
-                        net_if_ipv4_addr_add(iface, &addr, NET_ADDR_DHCP, 0);
-                        
-                        /* Set netmask and gateway */
-                        net_if_ipv4_set_netmask_by_addr(iface, &addr, &netmask_addr);
-                        net_if_ipv4_set_gw(iface, &gw_addr);
-                        
-                        /* Log the assigned IP information */
-                        LOG_INF("EMW3080 L2: Assigned IP=%d.%d.%d.%d",
-                            (addr.s_addr) & 0xFF, (addr.s_addr >> 8) & 0xFF, 
-                            (addr.s_addr >> 16) & 0xFF, (addr.s_addr >> 24) & 0xFF);
+                        /* DHCP packets should be forwarded to the actual WiFi network */
+                        /* Only auto-assign IP if we're not connected to a real WiFi network */
+                        LOG_INF("EMW3080 L2: DHCP packet - forwarding to real network for IP assignment");
                     }
                 }
             }
@@ -190,21 +178,8 @@ int emw3080_attach_l2_to_iface(struct net_if *iface)
         
         /* Since direct modification isn't working, we'll need to use the DHCP
          * static IP configuration approach instead */
-        LOG_INF("EMW3080: Will use static IP configuration instead of DHCP");
-        
-        /* Configure a static IP for testing purposes */
-        struct in_addr addr = { .s_addr = htonl(0xC0A80164) };  /* 192.168.1.100 */
-        struct in_addr netmask = { .s_addr = htonl(0xFFFFFF00) };  /* 255.255.255.0 */
-        struct in_addr gw = { .s_addr = htonl(0xC0A80101) };  /* 192.168.1.1 */
-        
-        /* Add the static IP configuration */
-        net_if_ipv4_addr_add(iface, &addr, NET_ADDR_MANUAL, 0);
-        net_if_ipv4_set_netmask_by_addr(iface, &addr, &netmask);
-        net_if_ipv4_set_gw(iface, &gw);
-        
-        LOG_INF("EMW3080: Static IP configuration: %d.%d.%d.%d", 
-               (addr.s_addr) & 0xFF, (addr.s_addr >> 8) & 0xFF, 
-               (addr.s_addr >> 16) & 0xFF, (addr.s_addr >> 24) & 0xFF);
+        LOG_ERR("EMW3080: No real DHCP implementation - hardware communication required");
+        return -ENOTSUP;
     } else {
         LOG_ERR("EMW3080: Cannot access interface device context");
         

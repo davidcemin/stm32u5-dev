@@ -13,7 +13,7 @@ LOG_MODULE_REGISTER(emw3080, CONFIG_LOG_DEFAULT_LEVEL);
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
+#include <zephyr/drivers/spi.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_offload.h>
@@ -21,10 +21,15 @@ LOG_MODULE_REGISTER(emw3080, CONFIG_LOG_DEFAULT_LEVEL);
 #include <zephyr/sys/printk.h>
 
 #include "emw3080.h"
+#include "emw3080_spi.h"
+
+#include "emw3080.h"
+#include "emw3080_spi.h"
 #include "emw3080_mgmt.h" /* Include the management header for function declarations */
 #include "emw3080_socket.h" /* Include the socket header for process_ipd function */
 #include "emw3080_uart.h" /* Include the UART header for UART functions */
 #include "emw3080_hw.h" /* Include the hardware header for HW functions */
+#include "emw3080_ipc.h" /* Include the IPC header for binary protocol functions */
 
 /* EMW3080 specific defines */
 #define EMW3080_MAX_DATA_SIZE 2048
@@ -102,21 +107,16 @@ static void emw3080_iface_init(struct net_if *iface)
            net_if_flag_is_set(iface, NET_IF_RUNNING));
 }
 
-/* Forward declaration of the work handler */
-static void emw3080_request_handler(struct k_work *work);
-
-/* Driver initialization - SAFE BOOT version */
+/* Driver initialization - SPI version */
 static int emw3080_init(const struct device *dev)
 {
     struct emw3080_data *data = dev->data;
     data->dev = dev;
 
-    LOG_INF("Initializing EMW3080 WiFi driver in SAFE MODE [%s]", dev->name);
-    
-    /* Minimal initialization to prevent boot issues */
+    LOG_INF("Initializing EMW3080 WiFi driver with SPI [%s]", dev->name);
     
     /* Initialize the semaphores and mutex */
-    k_mutex_init(&data->uart_mutex);
+    k_mutex_init(&data->spi_mutex);
     k_sem_init(&data->rx_buf.sem, 0, 1);
     
     /* Initialize socket structures - basic initialization only */
@@ -127,22 +127,66 @@ static int emw3080_init(const struct device *dev)
         k_sem_init(&data->sockets[i].sem, 0, 1);
     }
     
-    /* Store UART device but don't configure it yet */
-    if (data->uart) {
-        LOG_INF("UART device from DT binding: %s", data->uart->name);
-    } else {
-        const struct device *uart4 = device_get_binding("uart4");
-        if (uart4) {
-            LOG_INF("Using UART4: %s", uart4->name);
-            data->uart = uart4;
+    /* Get and store SPI device */
+    if (data->spi) {
+        LOG_INF("SPI device from DT binding: %s", data->spi->name);
+        
+        /* Initialize SPI communication */
+        int ret = emw3080_spi_init(data->spi);
+        if (ret == 0) {
+            LOG_INF("SPI communication initialized successfully");
+            
+            /* Initialize binary IPC protocol */
+            ret = emw3080_ipc_init(dev);
+            if (ret == 0) {
+                LOG_INF("EMW3080 IPC protocol initialized successfully");
+                
+                /* Get firmware version */
+                char version[64];
+                ret = emw3080_ipc_get_version(dev, version, sizeof(version));
+                if (ret == 0) {
+                    LOG_INF("EMW3080 firmware version: %s", version);
+                }
+                
+                /* Get MAC address and set it properly */
+                uint8_t mac[6];
+                ret = emw3080_ipc_get_mac(dev, mac);
+                if (ret == 0) {
+                    LOG_INF("EMW3080 MAC address: %02x:%02x:%02x:%02x:%02x:%02x",
+                            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+                    /* Store MAC address in data structure */
+                    memcpy(data->mac_addr, mac, 6);
+                } else {
+                    LOG_WRN("Failed to get MAC address, using default");
+                    /* Use default MAC address */
+                    uint8_t default_mac[6] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 };
+                    memcpy(data->mac_addr, default_mac, 6);
+                }
+                
+                /* Enable network bypass mode for Zephyr integration */
+                ret = emw3080_ipc_set_bypass_mode(dev, true);
+                if (ret == 0) {
+                    LOG_INF("EMW3080 network bypass mode enabled");
+                } else {
+                    LOG_WRN("Failed to enable bypass mode: %d", ret);
+                }
+                
+            } else {
+                LOG_ERR("IPC protocol initialization failed: %d", ret);
+                return ret;
+            }
+        } else {
+            LOG_WRN("SPI communication init failed: %d", ret);
         }
+    } else {
+        LOG_ERR("No SPI device available");
+        return -ENODEV;
     }
     
     /* Set WiFi connection state */
     data->connected = false;
     
-    /* We'll do the actual initialization later, on first use */
-    LOG_INF("EMW3080 driver initialized in SAFE MODE - actual init will be done later");
+    LOG_INF("EMW3080 driver initialized with SPI");
     return 0;
 }
 
@@ -155,151 +199,17 @@ void emw3080_uart_isr(const struct device *uart, void *user_data)
     return;
 }
 
-/* Implementation of send AT command function declared in header */
+/* Implementation of send AT command function - DEPRECATED: AT commands replaced by MIPC */
 int emw3080_send_at_cmd(struct emw3080_data *data, 
                       const char *cmd, size_t cmd_len,
                       char *resp_buf, size_t resp_len,
                       uint32_t timeout_ms)
 {
-    int ret;
-    int retry_count = 3; // Number of retries for AT commands
-    
-    if (!data || !data->uart) {
-        LOG_ERR("Invalid data or UART device not available");
-        return -EINVAL;
-    }
-    
-    if (!device_is_ready(data->uart)) {
-        LOG_ERR("UART device not ready for AT commands");
-        return -ENODEV;
-    }
-    
-    LOG_INF("Sending AT command (len=%d, timeout=%dms): %.*s", 
-           cmd_len, timeout_ms, (int)cmd_len, cmd);
-    
-    while (retry_count-- > 0) {
-        /* Lock UART access */
-        k_mutex_lock(&data->uart_mutex, K_FOREVER);
-        
-        /* Reset buffer */
-        data->rx_buf.len = 0;
-        data->rx_buf.data_ready = false;
-        
-        /* Flush RX buffer before sending */
-        emw3080_uart_flush_rx(data->uart);
-        
-        /* Send command using direct polling */
-        LOG_DBG("Writing command to UART (attempt %d)...", 3 - retry_count);
-        
-        /* Direct send each character with poll_out - more reliable */
-        for (size_t i = 0; i < cmd_len; i++) {
-            uart_poll_out(data->uart, cmd[i]);
-            k_busy_wait(500); /* 500us delay between chars */
-        }
-        
-        /* Wait a bit for any immediate responses */
-        k_sleep(K_MSEC(10));
-        
-        /* Now poll for response with timeout */
-        uint32_t start_time = k_uptime_get_32();
-        uint32_t end_time = start_time + timeout_ms;
-        bool got_ok = false;
-        bool got_error = false;
-        
-        /* Read response with polling instead of interrupts */
-        while (k_uptime_get_32() < end_time && !got_ok && !got_error) {
-            uint8_t c;
-            
-            /* Check if there's data available */
-            if (uart_poll_in(data->uart, &c) == 0) {
-                /* Got a character, add to buffer */
-                if (data->rx_buf.len < EMW3080_MAX_DATA_SIZE - 1) {
-                    data->rx_buf.data[data->rx_buf.len++] = c;
-                    
-                    /* Check for OK response */
-                    if (data->rx_buf.len >= 4 && 
-                        memcmp(&data->rx_buf.data[data->rx_buf.len - 4], "OK\r\n", 4) == 0) {
-                        LOG_INF("Found OK response");
-                        got_ok = true;
-                        break;
-                    }
-                    
-                    /* Check for ERROR response */
-                    if (data->rx_buf.len >= 7 && 
-                        memcmp(&data->rx_buf.data[data->rx_buf.len - 7], "ERROR\r\n", 7) == 0) {
-                        LOG_WRN("Found ERROR response");
-                        got_error = true;
-                        break;
-                    }
-                } else {
-                    /* Buffer overflow, reset */
-                    LOG_ERR("Buffer overflow");
-                    data->rx_buf.len = 0;
-                }
-            } else {
-                /* No data available, sleep a bit */
-                k_sleep(K_MSEC(10));
-            }
-        }
-        
-        /* Copy response if buffer provided */
-        if (resp_buf && resp_len > 0 && data->rx_buf.len > 0) {
-            size_t copy_len = data->rx_buf.len < resp_len ? data->rx_buf.len : resp_len - 1;
-            memcpy(resp_buf, data->rx_buf.data, copy_len);
-            resp_buf[copy_len] = '\0';
-            LOG_DBG("Response: %s", resp_buf);
-        }
-        
-        /* Check results */
-        if (got_ok) {
-            LOG_DBG("Command successful");
-            k_mutex_unlock(&data->uart_mutex);
-            return 0; /* Success */
-        } else if (got_error) {
-            LOG_WRN("Command returned error");
-            k_mutex_unlock(&data->uart_mutex);
-            return -EIO; /* Error */
-        } else if (data->rx_buf.len > 0) {
-            /* Got partial response but no OK/ERROR */
-            LOG_WRN("Partial response: %.*s", 
-                   data->rx_buf.len > 40 ? 40 : data->rx_buf.len,
-                   data->rx_buf.data);
-                   
-            /* Check if there's "OK" anywhere in the response */
-            for (size_t i = 0; i < data->rx_buf.len - 1; i++) {
-                if (data->rx_buf.data[i] == 'O' && data->rx_buf.data[i+1] == 'K') {
-                    LOG_INF("Found OK in response");
-                    k_mutex_unlock(&data->uart_mutex);
-                    return 0; /* Success */
-                }
-            }
-            
-            k_mutex_unlock(&data->uart_mutex);
-            
-            if (retry_count > 0) {
-                LOG_WRN("Retrying command after delay...");
-                k_sleep(K_MSEC(100));
-                continue;
-            }
-            return -EIO;
-        } else {
-            LOG_ERR("Command timed out");
-            k_mutex_unlock(&data->uart_mutex);
-            
-            if (retry_count > 0) {
-                LOG_WRN("Retrying command after timeout...");
-                k_sleep(K_MSEC(100));
-                continue;
-            }
-            return -ETIMEDOUT; /* Timeout */
-        }
-    }
-    
-    /* If we get here, all retries failed */
-    LOG_ERR("Failed after all retries");
-    return -EIO;
+    LOG_ERR("AT commands are no longer supported - use MIPC protocol instead");
+    return -ENOTSUP;
 }
 
+/* Status check for EMW3080B */
 /* Function to parse IP address from response - used in multiple places */
 void emw3080_parse_ip_info(struct emw3080_data *data, char *resp)
 {
@@ -317,17 +227,6 @@ void emw3080_parse_ip_info(struct emw3080_data *data, char *resp)
 }
 
 /* Work queue handler for asynchronous processing */
-static void emw3080_request_handler(struct k_work *work)
-{
-    struct emw3080_data *data = CONTAINER_OF(work, struct emw3080_data, request_work);
-    char resp[64];
-    
-    /* Process queued requests - example: check connection status */
-    if (emw3080_send_at_cmd(data, "AT+CIPSTATUS\r\n", 13, resp, sizeof(resp), 1000) == 0) {
-        /* Process connection status response */
-        LOG_INF("Connection status: %s", resp);
-    }
-}
 
 /* Get the type of offloaded network interface */
 static enum offloaded_net_if_types emw3080_get_type(void)
@@ -382,8 +281,8 @@ static const struct wifi_mgmt_ops emw3080_mgmt_ops = {
     static struct emw3080_data emw3080_data_##inst = {                          \
         .reset_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, reset_gpios, {0}),         \
         .power_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, power_gpios, {0}),         \
-        /* Try to get the UART device from the device tree */                   \
-        .uart = DEVICE_DT_GET(DT_INST_BUS(inst)),                               \
+        /* Get the SPI device from the device tree */                           \
+        .spi = DEVICE_DT_GET(DT_INST_BUS(inst)),                                \
     };                                                                          \
                                                                                \
     DEVICE_DT_INST_DEFINE(inst,                                                 \
@@ -415,13 +314,13 @@ const struct device *get_emw3080_device(void)
 #include "emw3080_hw.h"
 
 /* Functions to be called from emw3080_fallback.c */
-int emw3080_init_with_uart(const struct device *dev, const struct device *uart_dev)
+int emw3080_init_with_spi(const struct device *dev, const struct device *spi_dev)
 {
     int ret;
     struct emw3080_data *data = dev->data;
     
-    /* Store the UART device pointer */
-    data->uart = uart_dev;
+    /* Store the SPI device pointer */
+    data->spi = spi_dev;
     
     /* Initialize hardware first */
     ret = emw3080_hw_init(data);
@@ -481,36 +380,28 @@ int emw3080_delayed_init(void)
         }
     }
     
-    /* Configure UART */
-    if (data->uart && device_is_ready(data->uart)) {
-        LOG_INF("Configuring UART: %s", data->uart->name);
+    /* SPI-based initialization - no UART needed */
+    if (data->spi && device_is_ready(data->spi)) {
+        LOG_INF("SPI device ready: %s", data->spi->name);
         
-        /* Configure the UART with proper settings */
-        struct uart_config uart_cfg = {
-            .baudrate = 115200,
-            .parity = UART_CFG_PARITY_NONE,
-            .stop_bits = UART_CFG_STOP_BITS_1,
-            .data_bits = UART_CFG_DATA_BITS_8,
-            .flow_ctrl = UART_CFG_FLOW_CTRL_NONE
-        };
-        
-        /* Apply configuration */
-        int ret = uart_configure(data->uart, &uart_cfg);
-        if (ret != 0) {
-            LOG_ERR("Failed to configure UART: %d", ret);
+        /* Hardware reset sequence */
+        if (device_is_ready(data->reset_gpio.port)) {
+            gpio_pin_configure_dt(&data->reset_gpio, GPIO_OUTPUT_ACTIVE);
+            k_msleep(10);
+            gpio_pin_configure_dt(&data->reset_gpio, GPIO_OUTPUT_INACTIVE);
+            k_msleep(100);
+            LOG_INF("EMW3080 hardware reset completed");
         }
         
-        /* Ensure all interrupts are disabled */
-        uart_irq_rx_disable(data->uart);
-        uart_irq_tx_disable(data->uart);
-        
-        /* Clear any pending data */
-        uint8_t c;
-        while (uart_poll_in(data->uart, &c) == 0) {
-            /* Discard the character */
+        /* Power control */
+        if (device_is_ready(data->power_gpio.port)) {
+            gpio_pin_configure_dt(&data->power_gpio, GPIO_OUTPUT_ACTIVE);
+            k_msleep(50);
+            LOG_INF("EMW3080 power enabled");
         }
+        
     } else {
-        LOG_ERR("UART device not ready");
+        LOG_ERR("SPI device not ready");
         return -ENODEV;
     }
     

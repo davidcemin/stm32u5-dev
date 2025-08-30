@@ -1,0 +1,37 @@
+/* Enable UART4 for EMW3080 Wi-Fi module */
+&uart4 {
+    status = "okay";
+    current-speed = <115200>;
+    pinctrl-0 = <&uart4_tx_pc10 &uart4_rx_pc11>;
+    pinctrl-names = "default";
+
+    /* Disable the Bluetooth HCI UART that's trying to use the same UART4 */
+    bt_hci_uart {
+        status = "disabled";
+    };
+
+    /* EMW3080 Wi-Fi module - note the compatible string must match DT_DRV_COMPAT in driver */
+    emw3080 {
+        compatible = "mxchip,emw3080";
+        status = "okay";
+        
+        /* Using PC7 as reset pin (adjust as needed) */
+        reset-gpios = <&gpioc 7 GPIO_ACTIVE_LOW>;
+    };
+};
+
+/ {
+    chosen {
+        zephyr,console = &usart1;   /* keep console on USART1 */
+        /* Make sure BT HCI is not using uart4 */
+        /delete-property/ zephyr,bt-hci;
+        /* Add a new BT HCI on a different UART if needed */
+        /* zephyr,bt-hci = &bt_hci_uart2; */
+    };
+
+    /* Define reset GPIO pin - PC7 for EMW3080 reset */
+    aliases {
+        wifi0 = &uart4;
+    };
+};
+

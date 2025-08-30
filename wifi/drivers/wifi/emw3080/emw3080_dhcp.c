@@ -30,10 +30,8 @@ int emw3080_handle_dhcp(struct net_if *iface, struct net_pkt *pkt)
     struct in_addr netmask;
     struct in_addr gw;
     
-    /* Set up a mock IP address (192.168.1.100) */
-    addr.s_addr = htonl(0xC0A80164);  /* 192.168.1.100 */
-    netmask.s_addr = htonl(0xFFFFFF00);  /* 255.255.255.0 */
-    gw.s_addr = htonl(0xC0A80101);  /* 192.168.1.1 */
+    LOG_ERR("EMW3080 DHCP: No real DHCP implementation - hardware communication required");
+    return -ENOTSUP;
     
     /* Add the IP address to the interface */
     net_if_ipv4_addr_add(iface, &addr, NET_ADDR_DHCP, 0);

@@ -1,0 +1,25 @@
+# Build directory
+build/
+
+# ST MX WiFi Library (reference only, not part of our implementation)
+mx_wifi_library/
+
+# Analysis and research files (keep local only)
+CRASH_ANALYSIS.md
+REAL_SCAN_IMPLEMENTATION.md
+*.new
+
+# IDE and editor files
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

@@ -46,7 +46,7 @@ void emw3080_debug_list_devices(void)
     #endif
     
     /* Special check for UART4 which we need for EMW3080 */
-    const struct device *uart4 = DEVICE_DT_GET(DT_NODELABEL(uart4));
+    const struct device *spi2 = DEVICE_DT_GET(DT_NODELABEL(spi2));
     if (uart4 != NULL) {
         LOG_INF("UART4 found via DT_NODELABEL: %s (ready: %d)", 
                 uart4->name, device_is_ready(uart4));
