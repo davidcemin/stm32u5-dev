@@ -19,6 +19,7 @@ target_include_directories(app PRIVATE ${ZEPHYR_BASE}/include/zephyr/drivers)
 target_sources(app PRIVATE
     src/main.c
     src/wifi_shell.c
+    src/emw3080_network.c
     src/tests/slip_test.c
     src/tests/emw3080_spi_test.c  # SPI test - now needed for main function
     drivers/wifi/emw3080/emw3080_main_stubs.c
