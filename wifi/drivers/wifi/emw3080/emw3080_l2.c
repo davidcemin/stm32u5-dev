@@ -101,35 +101,9 @@ static int emw3080_l2_send(struct net_if *iface, struct net_pkt *pkt)
                                ntohs(udp_hdr.src_port), ntohs(udp_hdr.dst_port));
                         is_dhcp = true;
                         
-                        /* For SPI implementation demo: Auto-assign a static IP when DHCP is requested */
-                        LOG_INF("EMW3080 L2: SPI Implementation - Auto-assigning static IP for demo");
-                        
-                        /* Set up a static IP address (192.168.1.100) */
-                        struct in_addr addr = { .s_addr = htonl(0xC0A80164) };  /* 192.168.1.100 */
-                        struct in_addr netmask_addr = { .s_addr = htonl(0xFFFFFF00) };  /* 255.255.255.0 */
-                        struct in_addr gw_addr = { .s_addr = htonl(0xC0A80101) };  /* 192.168.1.1 */
-                        
-                        /* Add the IP address to the interface */
-                        if (net_if_ipv4_addr_add(iface, &addr, NET_ADDR_DHCP, 0) != NULL) {
-                            LOG_INF("EMW3080 L2: Successfully added IP address to interface");
-                        } else {
-                            LOG_WRN("EMW3080 L2: Failed to add IP address to interface");
-                        }
-                        
-                        /* Set netmask and gateway */
-                        net_if_ipv4_set_netmask_by_addr(iface, &addr, &netmask_addr);
-                        net_if_ipv4_set_gw(iface, &gw_addr);
-                        
-                        /* Log the assigned IP information */
-                        LOG_INF("EMW3080 L2: Demo IP Configuration Assigned:");
-                        LOG_INF("  IP Address: %d.%d.%d.%d",
-                            (addr.s_addr) & 0xFF, (addr.s_addr >> 8) & 0xFF, 
-                            (addr.s_addr >> 16) & 0xFF, (addr.s_addr >> 24) & 0xFF);
-                        LOG_INF("  Netmask: 255.255.255.0");
-                        LOG_INF("  Gateway: 192.168.1.1");
-                        
-                        /* DISABLED: Test SPI communication - causes memory corruption crashes */
-                        LOG_INF("EMW3080 L2: SPI AT test disabled for safety");
+                        /* DHCP packets should be forwarded to the actual WiFi network */
+                        /* Only auto-assign IP if we're not connected to a real WiFi network */
+                        LOG_INF("EMW3080 L2: DHCP packet - forwarding to real network for IP assignment");
                     }
                 }
             }
@@ -204,21 +178,8 @@ int emw3080_attach_l2_to_iface(struct net_if *iface)
         
         /* Since direct modification isn't working, we'll need to use the DHCP
          * static IP configuration approach instead */
-        LOG_INF("EMW3080: Will use static IP configuration instead of DHCP");
-        
-        /* Configure a static IP for testing purposes */
-        struct in_addr addr = { .s_addr = htonl(0xC0A80164) };  /* 192.168.1.100 */
-        struct in_addr netmask = { .s_addr = htonl(0xFFFFFF00) };  /* 255.255.255.0 */
-        struct in_addr gw = { .s_addr = htonl(0xC0A80101) };  /* 192.168.1.1 */
-        
-        /* Add the static IP configuration */
-        net_if_ipv4_addr_add(iface, &addr, NET_ADDR_MANUAL, 0);
-        net_if_ipv4_set_netmask_by_addr(iface, &addr, &netmask);
-        net_if_ipv4_set_gw(iface, &gw);
-        
-        LOG_INF("EMW3080: Static IP configuration: %d.%d.%d.%d", 
-               (addr.s_addr) & 0xFF, (addr.s_addr >> 8) & 0xFF, 
-               (addr.s_addr >> 16) & 0xFF, (addr.s_addr >> 24) & 0xFF);
+        LOG_ERR("EMW3080: No real DHCP implementation - hardware communication required");
+        return -ENOTSUP;
     } else {
         LOG_ERR("EMW3080: Cannot access interface device context");
         

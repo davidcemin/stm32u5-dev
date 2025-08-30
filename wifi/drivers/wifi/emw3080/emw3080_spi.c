@@ -82,11 +82,51 @@ int emw3080_spi_transceive(const struct device *spi_dev,
                           const uint8_t *tx_buf, size_t tx_len,
                           uint8_t *rx_buf, size_t rx_len)
 {
-    if (!spi_dev || !device_is_ready(spi_dev)) {
-        LOG_ERR("SPI device not ready");
+    /* CRITICAL: Add extensive safety checks to prevent crashes */
+    LOG_INF("EMW3080 SPI: Starting transceive - tx_len=%zu, rx_len=%zu", tx_len, rx_len);
+    
+    if (!spi_dev) {
+        LOG_ERR("EMW3080 SPI: NULL SPI device pointer");
         return -ENODEV;
     }
-
+    
+    if (!device_is_ready(spi_dev)) {
+        LOG_ERR("EMW3080 SPI: Device %s not ready", spi_dev->name);
+        return -ENODEV;
+    }
+    
+    /* Validate the SPI device API before using it */
+    if (!spi_dev->api) {
+        LOG_ERR("EMW3080 SPI: Device has no API");
+        return -ENODEV;
+    }
+    
+    const struct spi_driver_api *api = (const struct spi_driver_api *)spi_dev->api;
+    if (!api->transceive) {
+        LOG_ERR("EMW3080 SPI: Device API has no transceive function");
+        return -ENODEV;
+    }
+    
+    /* Validate buffer parameters */
+    if (tx_len > 0 && !tx_buf) {
+        LOG_ERR("EMW3080 SPI: TX buffer NULL but length > 0");
+        return -EINVAL;
+    }
+    
+    if (rx_len > 0 && !rx_buf) {
+        LOG_ERR("EMW3080 SPI: RX buffer NULL but length > 0");
+        return -EINVAL;
+    }
+    
+    /* Validate reasonable buffer sizes to prevent memory issues */
+    if (tx_len > 1024 || rx_len > 1024) {
+        LOG_ERR("EMW3080 SPI: Buffer size too large (tx:%zu, rx:%zu)", tx_len, rx_len);
+        return -EINVAL;
+    }
+    
+    LOG_INF("EMW3080 SPI: Safety checks passed, attempting SPI transaction");
+    
+    /* SAFE APPROACH: Try the transaction with error handling */
     struct spi_buf tx_bufs[] = {
         {.buf = (void *)tx_buf, .len = tx_len}
     };
@@ -94,14 +134,33 @@ int emw3080_spi_transceive(const struct device *spi_dev,
         {.buf = rx_buf, .len = rx_len}
     };
     
-    struct spi_buf_set tx_set = {.buffers = tx_bufs, .count = 1};
-    struct spi_buf_set rx_set = {.buffers = rx_bufs, .count = 1};
+    struct spi_buf_set tx_set = {.buffers = tx_bufs, .count = (tx_len > 0) ? 1 : 0};
+    struct spi_buf_set rx_set = {.buffers = rx_bufs, .count = (rx_len > 0) ? 1 : 0};
     
-    int ret = spi_transceive(spi_dev, &emw3080_spi_cfg, &tx_set, &rx_set);
-    if (ret < 0) {
-        LOG_ERR("SPI transceive failed: %d", ret);
+    /* Log what we're about to do */
+    LOG_INF("EMW3080 SPI: Calling spi_transceive with config freq=%d", emw3080_spi_cfg.frequency);
+    
+    /* CRITICAL: Try to detect SPI configuration issues before they crash */
+    if (emw3080_spi_cfg.frequency == 0) {
+        LOG_ERR("EMW3080 SPI: Invalid SPI frequency (0)");
+        return -EINVAL;
     }
     
+    /* Attempt the actual SPI transaction */
+    int ret = spi_transceive(spi_dev, &emw3080_spi_cfg, &tx_set, &rx_set);
+    
+    if (ret < 0) {
+        LOG_ERR("EMW3080 SPI: Transaction failed with error %d", ret);
+        
+        /* Log more details about the failure */
+        LOG_ERR("EMW3080 SPI: Device: %s", spi_dev->name);
+        LOG_ERR("EMW3080 SPI: Config - freq:%d, op:0x%08x", 
+                emw3080_spi_cfg.frequency, emw3080_spi_cfg.operation);
+        
+        return ret;
+    }
+    
+    LOG_INF("EMW3080 SPI: Transaction completed successfully");
     return ret;
 }
 

@@ -17,13 +17,20 @@ LOG_MODULE_REGISTER(emw3080_offload, CONFIG_LOG_DEFAULT_LEVEL);
 #include <zephyr/net/net_l2.h>
 #include <zephyr/net/ethernet.h>
 #include <zephyr/net/offloaded_netdev.h>
+#include <zephyr/net/dhcpv4.h>
 #include "emw3080_dhcp.h"
 #include "emw3080_l2.h"
+#include "emw3080_mgmt.h"
 
 /* Include the L2 implementation for offloaded network devices */
 NET_L2_DECLARE_PUBLIC(OFFLOADED_NETDEV);
 
 /* We'll use the L2 implementation directly instead of offload API */
+
+/* Global interface for DHCP responses */
+static struct net_if *g_wifi_iface = NULL;
+
+/* Remove simulated DHCP response - we want real DHCP */
 
 /* Ethernet L2 compatible send function that can be called directly by L2 */
 int emw3080_offload_send_pkt(struct net_if *iface, struct net_pkt *pkt)
@@ -33,6 +40,9 @@ int emw3080_offload_send_pkt(struct net_if *iface, struct net_pkt *pkt)
     
     LOG_INF("EMW3080 offload_send_pkt called: iface=%p (idx=%d), pkt=%p, len=%d", 
            iface, net_if_get_by_iface(iface), pkt, net_pkt_get_len(pkt));
+    
+    /* Store interface for DHCP responses */
+    g_wifi_iface = iface;
            
     if (!iface || !pkt) {
         LOG_ERR("EMW3080 offload_send_pkt: Invalid parameters: iface=%p, pkt=%p", iface, pkt);
@@ -97,9 +107,30 @@ int emw3080_offload_send_pkt(struct net_if *iface, struct net_pkt *pkt)
                 LOG_INF("DHCP packet detected - ports %d -> %d", src_port, dst_port);
                 is_dhcp = true;
                 
-                /* For DHCP packets in SPI implementation, we return success immediately */
-                /* The actual IP configuration is handled in the L2 layer */
-                LOG_INF("EMW3080 offload_send_pkt: DHCP packet - returning success (SPI implementation)");
+                /* Handle DHCP by forwarding to real WiFi hardware */
+                if (src_port == 68 && dst_port == 67) {
+                    /* This is a DHCP request from client to server */
+                    LOG_INF("EMW3080 offload_send_pkt: DHCP REQUEST - forwarding to real WiFi network");
+                    
+                    /* Get the EMW3080 device and send real DHCP request */
+                    const struct device *emw_dev = net_if_get_device(iface);
+                    if (emw_dev) {
+                        /* Send the actual DHCP packet to the WiFi hardware */
+                        int ret = emw3080_send_dhcp_packet(emw_dev, pkt);
+                        if (ret < 0) {
+                            LOG_ERR("EMW3080 offload_send_pkt: Failed to send DHCP to hardware: %d", ret);
+                        } else {
+                            LOG_INF("EMW3080 offload_send_pkt: DHCP packet sent to real WiFi hardware");
+                        }
+                    } else {
+                        LOG_ERR("EMW3080 offload_send_pkt: No EMW3080 device available");
+                    }
+                    
+                } else {
+                    /* This is a DHCP response from server to client */
+                    LOG_INF("EMW3080 offload_send_pkt: DHCP RESPONSE - processing real network response");
+                }
+                
                 net_pkt_cursor_restore(pkt, &backup);
                 return net_pkt_get_len(pkt);  /* Return packet size as successfully sent */
             }

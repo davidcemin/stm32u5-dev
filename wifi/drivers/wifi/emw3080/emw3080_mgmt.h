@@ -23,10 +23,17 @@ int emw3080_mgmt_connect(const struct device *dev, struct wifi_connect_req_param
 int emw3080_mgmt_disconnect(const struct device *dev);
 int emw3080_mgmt_get_status(const struct device *dev, struct wifi_iface_status *status);
 
+/* DHCP packet handling */
+int emw3080_send_dhcp_packet(const struct device *dev, struct net_pkt *pkt);
+
 /* Initialize the WiFi management interface */
 void emw3080_mgmt_init(void);
 
 /* Set the network interface for management functions */
 void emw3080_mgmt_set_iface(struct net_if *net_iface);
+
+/* EMW3080 IPC API */
+int emw3080_ipc_init(const struct device *dev);
+int emw3080_ipc_init_auto(void);  /* Auto-find device wrapper */
 
 #endif /* EMW3080_MGMT_H */

@@ -310,6 +310,17 @@ int main(void)
         LOG_WRN("Fallback initialization returned: %d", ret);
     }
     
+    /* Initialize EMW3080 IPC layer - CRITICAL for scan/connect to work */
+    LOG_INF("Initializing EMW3080 IPC layer...");
+    extern int emw3080_ipc_init_auto(void);
+    ret = emw3080_ipc_init_auto();
+    if (ret == 0) {
+        LOG_INF("EMW3080 IPC initialization successful");
+    } else {
+        LOG_ERR("EMW3080 IPC initialization failed: %d", ret);
+        LOG_ERR("WiFi scan/connect will not work!");
+    }
+    
     /* Wait longer for network interfaces to initialize - 
      * safe mode takes more time to initialize */
     k_sleep(K_SECONDS(2));
@@ -423,6 +434,8 @@ int main(void)
     }
 
     LOG_INF("WiFi L2 implementation active");
-}    LOG_INF("Initialization complete - WiFi sample is running");
+    }
+    
+    LOG_INF("Initialization complete - WiFi sample is running");
     return 0;
 }

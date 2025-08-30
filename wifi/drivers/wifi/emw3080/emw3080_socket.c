@@ -229,10 +229,9 @@ void emw3080_process_ipd(struct emw3080_data *data, const uint8_t *ipd_data, uin
             
             /* Set static configuration for testing */
             if (addr.s_addr == 0) {
-                /* Use fallback static address if DHCP doesn't provide one */
-                addr.s_addr = htonl(0xC0A80164);     /* 192.168.1.100 */
-                netmask.s_addr = htonl(0xFFFFFF00);  /* 255.255.255.0 */
-                gateway.s_addr = htonl(0xC0A80101);  /* 192.168.1.1 */
+                /* No IP address available from DHCP */
+                LOG_ERR("EMW3080: No IP address available from DHCP");
+                return;
             } else {
                 /* Use standard class C netmask and gateway on same subnet */
                 netmask.s_addr = htonl(0xFFFFFF00);  /* 255.255.255.0 */
