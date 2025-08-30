@@ -6,10 +6,12 @@
 #include <zephyr/net/offloaded_netdev.h>
 #include <zephyr/net/dhcpv4.h>
 #include <zephyr/net/net_ip.h>
+#include <zephyr/drivers/gpio.h>
 #include <string.h>
 
 /* Include the EMW3080 management header directly to access its API */
 #include "../drivers/wifi/emw3080/emw3080_mgmt.h"
+#include "../drivers/wifi/emw3080/emw3080.h"
 
 /* Include MIPC protocol support */
 #include <zephyr/shell/shell.h>
@@ -17,31 +19,6 @@
 
 #include "../drivers/wifi/emw3080/emw3080_mipc.h"
 #include "../drivers/wifi/emw3080/emw3080_mipc_spi.h"
-
-/* Helper function to get the EMW3080 device directly */
-static const struct device *get_emw3080_device(void)
-{
-    /* Look for a device with EMW3080 in the name */
-    int i = 0;
-    
-    for (i = 0; i < CONFIG_NET_IF_MAX_IPV4_COUNT; i++) {
-        struct net_if *tmp = net_if_get_by_index(i);
-        if (!tmp) {
-            continue;
-        }
-        
-        const struct device *dev = net_if_get_device(tmp);
-        if (!dev) {
-            continue;
-        }
-        
-        if (dev->name && strstr(dev->name, "EMW3080") != NULL) {
-            return dev;  /* Return the device directly */
-        }
-    }
-    
-    return NULL;  /* No EMW3080 device found */
-}
 
 /* Helper function to get Wi-Fi interface - ULTRA SAFE IMPLEMENTATION */
 static struct net_if *get_wifi_iface(void)
@@ -1117,6 +1094,38 @@ static int cmd_mipc_poll(const struct shell *sh, size_t argc, char **argv)
     return 0;
 }
 
+static int cmd_emw3080_reset(const struct shell *sh, size_t argc, char **argv)
+{
+    shell_fprintf(sh, SHELL_NORMAL, "Resetting EMW3080 module...\n");
+    
+    /* Get the WiFi device */
+    const struct device *wifi_dev = get_emw3080_device();
+    if (!wifi_dev || !device_is_ready(wifi_dev)) {
+        shell_fprintf(sh, SHELL_ERROR, "WiFi device not ready\n");
+        return -1;
+    }
+    
+    /* Get the device data to access reset GPIO */
+    struct emw3080_data *data = wifi_dev->data;
+    
+    if (!data->reset_gpio.port) {
+        shell_fprintf(sh, SHELL_ERROR, "Reset GPIO not configured\n");
+        return -1;
+    }
+    
+    /* Perform hardware reset */
+    shell_fprintf(sh, SHELL_NORMAL, "Asserting reset (active low)...\n");
+    gpio_pin_set_dt(&data->reset_gpio, 1); /* Assert reset (active low means high = reset) */
+    k_sleep(K_MSEC(200));                  /* Hold in reset */
+    
+    shell_fprintf(sh, SHELL_NORMAL, "Releasing reset...\n");
+    gpio_pin_set_dt(&data->reset_gpio, 0); /* Release reset */
+    k_sleep(K_MSEC(500));                  /* Allow time to boot */
+    
+    shell_fprintf(sh, SHELL_NORMAL, "EMW3080 reset completed\n");
+    return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(wifi_cmds,
     SHELL_CMD(scan, NULL, "Scan for Wi-Fi networks", cmd_wifi_scan),
     SHELL_CMD(connect, NULL, "Connect: wifi connect <SSID> <PSK> [security_type]", cmd_wifi_connect),
@@ -1128,6 +1137,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(wifi_cmds,
     SHELL_CMD(ping, NULL, "Network test: wifi ping <ip/hostname>", cmd_wifi_ping),
     SHELL_CMD(diagnose, NULL, "Run network diagnostics", cmd_wifi_diagnose),
     SHELL_CMD(spitest, NULL, "Test SPI communication with EMW3080", cmd_spi_test),
+    SHELL_CMD(reset, NULL, "Reset EMW3080 module", cmd_emw3080_reset),
     SHELL_CMD(mipc_init, NULL, "Initialize MIPC protocol", cmd_mipc_init),
     SHELL_CMD(mipcecho, NULL, "Test MIPC echo: wifi mipcecho <string>", cmd_mipc_echo),
     SHELL_CMD(mipcver, NULL, "Get system version via MIPC", cmd_mipc_version),
