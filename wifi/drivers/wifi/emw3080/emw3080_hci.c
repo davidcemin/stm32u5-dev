@@ -107,32 +107,62 @@ int emw3080_hci_send_command(const struct device *dev,
         return -ENODEV;
     }
 
-    LOG_DBG("HCI: Sending MX WiFi command - cat:0x%02x cmd:0x%02x param_len:%zu", 
-            category, command, param_len);
+    /* Map our HCI commands to MX WiFi IPC API IDs */
+    uint16_t api_id = 0;
+    if (category == EMW3080_HCI_CAT_SYSTEM) {
+        if (command == EMW3080_HCI_SYS_PING) {
+            api_id = 0x0001; /* MIPC_API_SYS_ECHO_CMD */
+        } else if (command == EMW3080_HCI_SYS_VERSION) {
+            api_id = 0x0003; /* MIPC_API_SYS_VERSION_CMD */
+        }
+    } else if (category == EMW3080_HCI_CAT_WIFI) {
+        if (command == EMW3080_HCI_WIFI_GET_MAC) {
+            api_id = 0x0101; /* MIPC_API_WIFI_GET_MAC_CMD */
+        } else if (command == EMW3080_HCI_WIFI_SCAN) {
+            api_id = 0x0102; /* MIPC_API_WIFI_SCAN_CMD */
+        } else if (command == EMW3080_HCI_WIFI_STATUS) {
+            api_id = 0x0108; /* MIPC_API_WIFI_GET_LINKINFO_CMD */
+        }
+    }
+
+    if (api_id == 0) {
+        LOG_ERR("Unknown command: cat=0x%02x cmd=0x%02x", category, command);
+        return -EINVAL;
+    }
+
+    LOG_DBG("HCI: Sending MX WiFi IPC command - api_id:0x%04x param_len:%zu", 
+            api_id, param_len);
 
     /* Lock command mutex to ensure sequential access */
     k_mutex_lock(&g_hci_ctx.command_mutex, K_FOREVER);
 
     int ret = -ENOSYS;
 
-    /* Build MX WiFi compatible command packet */
-    uint8_t mx_packet[EMW3080_HCI_MAX_PACKET_SIZE];
+    /* Build MX WiFi IPC packet */
+    uint8_t ipc_packet[EMW3080_HCI_MAX_PACKET_SIZE];
     
-    /* For now, create a simple MX WiFi command format */
-    /* TODO: Research actual MX WiFi command format for ping, version, etc. */
-    mx_packet[0] = category;  /* Command category */
-    mx_packet[1] = command;   /* Command ID */
+    /* MX WiFi IPC Header: req_id (4 bytes) + api_id (2 bytes) */
+    uint32_t req_id = 0x12345678; /* Non-zero request ID */
+    
+    /* Pack IPC header (little-endian) */
+    ipc_packet[0] = (req_id >> 0) & 0xFF;
+    ipc_packet[1] = (req_id >> 8) & 0xFF;
+    ipc_packet[2] = (req_id >> 16) & 0xFF;
+    ipc_packet[3] = (req_id >> 24) & 0xFF;
+    ipc_packet[4] = (api_id >> 0) & 0xFF;
+    ipc_packet[5] = (api_id >> 8) & 0xFF;
+    
+    size_t packet_len = 6; /* Header size */
     
     /* Copy parameters if provided */
-    size_t payload_len = 2; /* category + command */
     if (params && param_len > 0) {
-        if (param_len > (EMW3080_HCI_MAX_PACKET_SIZE - 2)) {
+        if (param_len > (EMW3080_HCI_MAX_PACKET_SIZE - 6)) {
             LOG_ERR("Parameter size too large: %zu", param_len);
             ret = -EINVAL;
             goto cleanup;
         }
-        memcpy(mx_packet + 2, params, param_len);
-        payload_len += param_len;
+        memcpy(ipc_packet + 6, params, param_len);
+        packet_len += param_len;
     }
     
     /* Get SPI device */
@@ -145,26 +175,38 @@ int emw3080_hci_send_command(const struct device *dev,
         goto cleanup;
     }
     
-    /* Send command using MX WiFi SPI protocol */
-    ret = emw3080_spi_send_frame(spi_dev, mx_packet, payload_len);
+    /* Send MX WiFi IPC packet via SPI */
+    ret = emw3080_spi_send_frame(spi_dev, ipc_packet, packet_len);
     if (ret != 0) {
-        LOG_ERR("Failed to send MX WiFi command via SPI: %d", ret);
+        LOG_ERR("Failed to send MX WiFi IPC packet via SPI: %d", ret);
         goto cleanup;
     }
     
-    /* Try to receive response using MX WiFi protocol */
+    /* Try to receive MX WiFi IPC response with retry mechanism */
     if (response && response_len > 0) {
         uint8_t response_packet[EMW3080_HCI_MAX_PACKET_SIZE];
         size_t received_len = 0;
+        int response_ret = -ENODATA;
         
-        ret = emw3080_spi_recv_frame(spi_dev, response_packet, sizeof(response_packet), &received_len);
-        if (ret == 0 && received_len > 0) {
-            /* Copy response data */
-            size_t copy_len = (received_len < response_len) ? received_len : response_len;
-            memcpy(response, response_packet, copy_len);
-            LOG_DBG("HCI: Received MX WiFi response - %zu bytes", copy_len);
-        } else {
-            LOG_DBG("HCI: No MX WiFi response received (ret=%d, len=%zu)", ret, received_len);
+        /* Retry mechanism: EMW3080 needs time to process commands */
+        for (int retry = 0; retry < 10; retry++) {
+            /* Wait a bit for EMW3080 to process the command */
+            k_msleep(10 + (retry * 5)); /* Progressive delay: 10, 15, 20, 25... ms */
+            
+            response_ret = emw3080_spi_recv_frame(spi_dev, response_packet, sizeof(response_packet), &received_len);
+            if (response_ret == 0 && received_len > 6) {
+                /* Skip IPC header (6 bytes) and copy response data */
+                size_t response_data_len = received_len - 6;
+                size_t copy_len = (response_data_len < response_len) ? response_data_len : response_len;
+                memcpy(response, response_packet + 6, copy_len);
+                LOG_INF("HCI: Received MX WiFi IPC response after %d retries - %zu bytes", retry, copy_len);
+                break;
+            }
+            LOG_DBG("HCI: Response retry %d - no data yet", retry);
+        }
+        
+        if (response_ret != 0) {
+            LOG_DBG("HCI: No MX WiFi IPC response received after retries");
             /* For testing purposes, don't fail on missing response */
             ret = 0;
         }
