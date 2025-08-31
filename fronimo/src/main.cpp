@@ -4,6 +4,7 @@
 #include "sensors/hts221.h"
 #include "sensors/iis2mdc.h"
 #include "sensors/ism330dhcx.h"
+#include "sensors/lps22hh.h"
 
 LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
 
@@ -13,6 +14,7 @@ int main(void) {
     HTS221 hts;
     IIS2MDC mag;
     ISM330DHCX imu;
+    LPS22HH lps;
 
     if (!hts.isReady()) {
         LOG_ERR("HTS221 not available");
@@ -25,6 +27,10 @@ int main(void) {
     }
     if (!imu.isReady()) {
         LOG_ERR("ISM330DHCX not available");
+        return 0;
+    }
+    if(!lps.isReady()) {
+        LOG_ERR("LPS22HH not available");
         return 0;
     }
 
@@ -70,6 +76,15 @@ int main(void) {
                     gy_int / 100, abs(gy_int % 100),
                     gz_int / 100, abs(gz_int % 100));
         }
+
+        if(lps.sample()) {
+            float pressure = lps.getPressure();
+            float temperature = lps.getTemperature();
+            LOG_INF("Pressure: %d.%02d hPa, Temperature: %d.%02d °C",
+                    (int)pressure, (int)((pressure - (int)pressure) * 100),
+                    (int)temperature, (int)((temperature - (int)temperature) * 100));
+        }
+        LOG_INF("-------------------------------------------------------------------");
         k_sleep(K_SECONDS(2));
     }
 }
