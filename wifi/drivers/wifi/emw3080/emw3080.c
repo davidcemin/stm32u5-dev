@@ -130,59 +130,59 @@ static int emw3080_init(const struct device *dev)
         k_sem_init(&data->sockets[i].sem, 0, 1);
     }
     
+    /* Basic HW bring-up: power/reset before SPI init */
+    if (data->power_gpio.port && gpio_is_ready_dt(&data->power_gpio)) {
+        /* Drive to active state for enable (respect active-low) */
+        gpio_pin_configure_dt(&data->power_gpio, GPIO_OUTPUT_INACTIVE);
+        int active = (data->power_gpio.dt_flags & GPIO_ACTIVE_LOW) ? 0 : 1;
+        gpio_pin_set_dt(&data->power_gpio, active);
+        LOG_INF("EMW3080 power enabled (active=%d)", active);
+        k_msleep(50);
+    }
+    if (data->reset_gpio.port && gpio_is_ready_dt(&data->reset_gpio)) {
+        /* Configure output, start in inactive state */
+        gpio_pin_configure_dt(&data->reset_gpio, GPIO_OUTPUT_INACTIVE);
+        int assert_level = (data->reset_gpio.dt_flags & GPIO_ACTIVE_LOW) ? 0 : 1;
+        int release_level = assert_level ? 0 : 1;
+        /* Assert reset */
+        gpio_pin_set_dt(&data->reset_gpio, assert_level);
+        k_msleep(10);
+        /* Release reset */
+        gpio_pin_set_dt(&data->reset_gpio, release_level);
+    /* Allow module to boot firmware */
+    k_msleep(1500);
+        LOG_INF("EMW3080 hardware reset completed (assert=%d release=%d)", assert_level, release_level);
+    }
+
     /* Get and store SPI device */
     if (data->spi) {
         LOG_INF("SPI device from DT binding: %s", data->spi->name);
         /* Apply DT SPI config (freq, CS) */
-        const struct spi_dt_spec spec = SPI_DT_SPEC_GET(DT_DRV_INST(0),
-                                                        SPI_WORD_SET(8) | SPI_TRANSFER_MSB | SPI_MODE_CPOL | SPI_MODE_CPHA,
-                                                        0);
-        (void)emw3080_spi_set_dt_spec(&spec);
+    /* Use default SPI mode from DT (no CPOL/CPHA flags here = Mode 0 unless DT adds them) */
+    const struct spi_dt_spec spec = SPI_DT_SPEC_GET(
+    DT_DRV_INST(0),
+    SPI_WORD_SET(8) | SPI_TRANSFER_MSB
+#ifdef CONFIG_EMW3080_SPI_MODE3
+    | SPI_MODE_CPOL | SPI_MODE_CPHA
+#endif
+    ,
+    0);
+    (void)emw3080_spi_set_dt_spec(&spec);
         
         /* Initialize SPI communication */
-        int ret = emw3080_spi_init(data->spi);
+    /* Configure FLOW pin in SPI helper */
+    (void)emw3080_spi_set_flow_gpio(&data->wake_gpio);
+    int ret = emw3080_spi_init(data->spi);
         if (ret == 0) {
             LOG_INF("SPI communication initialized successfully");
             
-            /* Initialize binary IPC protocol */
+            /* Initialize binary IPC protocol only (no commands here) */
             ret = emw3080_ipc_init(dev);
-            if (ret == 0) {
-                LOG_INF("EMW3080 IPC protocol initialized successfully");
-                
-                /* Get firmware version */
-                char version[64];
-                ret = emw3080_ipc_get_version(dev, version, sizeof(version));
-                if (ret == 0) {
-                    LOG_INF("EMW3080 firmware version: %s", version);
-                }
-                
-                /* Get MAC address and set it properly */
-                uint8_t mac[6];
-                ret = emw3080_ipc_get_mac(dev, mac);
-                if (ret == 0) {
-                    LOG_INF("EMW3080 MAC address: %02x:%02x:%02x:%02x:%02x:%02x",
-                            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-                    /* Store MAC address in data structure */
-                    memcpy(data->mac_addr, mac, 6);
-                } else {
-                    LOG_WRN("Failed to get MAC address, using default");
-                    /* Use default MAC address */
-                    uint8_t default_mac[6] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 };
-                    memcpy(data->mac_addr, default_mac, 6);
-                }
-                
-                /* Enable network bypass mode for Zephyr integration */
-                ret = emw3080_ipc_set_bypass_mode(dev, true);
-                if (ret == 0) {
-                    LOG_INF("EMW3080 network bypass mode enabled");
-                } else {
-                    LOG_WRN("Failed to enable bypass mode: %d", ret);
-                }
-                
-            } else {
+            if (ret != 0) {
                 LOG_ERR("IPC protocol initialization failed: %d", ret);
                 return ret;
             }
+            LOG_INF("EMW3080 IPC protocol initialized successfully");
         } else {
             LOG_WRN("SPI communication init failed: %d", ret);
         }
@@ -368,69 +368,9 @@ int emw3080_delayed_init(void)
         return -EINVAL;
     }
     
-    LOG_INF("Performing delayed initialization of EMW3080 WiFi driver");
+    LOG_INF("Delayed init requested (noop by default)");
     
-    /* Initialize GPIO pins if available */
-    if (data->reset_gpio.port) {
-        LOG_INF("Configuring reset GPIO");
-        if (!gpio_is_ready_dt(&data->reset_gpio)) {
-            LOG_ERR("Reset GPIO device not ready");
-        } else {
-            gpio_pin_configure_dt(&data->reset_gpio, GPIO_OUTPUT_INACTIVE);
-        }
-    }
-    
-    if (data->power_gpio.port) {
-        LOG_INF("Configuring power GPIO");
-        if (!gpio_is_ready_dt(&data->power_gpio)) {
-            LOG_ERR("Power GPIO device not ready");
-        } else {
-            gpio_pin_configure_dt(&data->power_gpio, GPIO_OUTPUT_INACTIVE);
-        }
-    }
-    
-    /* SPI-based initialization - no UART needed */
-    if (data->spi && device_is_ready(data->spi)) {
-        LOG_INF("SPI device ready: %s", data->spi->name);
-        
-        /* Hardware reset sequence */
-        if (device_is_ready(data->reset_gpio.port)) {
-            gpio_pin_configure_dt(&data->reset_gpio, GPIO_OUTPUT_ACTIVE);
-            k_msleep(10);
-            gpio_pin_configure_dt(&data->reset_gpio, GPIO_OUTPUT_INACTIVE);
-            k_msleep(100);
-            LOG_INF("EMW3080 hardware reset completed");
-        }
-        
-        /* Power control */
-        if (device_is_ready(data->power_gpio.port)) {
-            gpio_pin_configure_dt(&data->power_gpio, GPIO_OUTPUT_ACTIVE);
-            k_msleep(50);
-            LOG_INF("EMW3080 power enabled");
-        }
-        
-    } else {
-        LOG_ERR("SPI device not ready");
-        return -ENODEV;
-    }
-    
-    /* Try a hardware reset */
-    LOG_INF("Attempting hardware reset");
-    if (data->reset_gpio.port) {
-        LOG_INF("Using GPIO reset");
-        gpio_pin_set_dt(&data->reset_gpio, 1); /* Assert reset (high) */
-        k_sleep(K_MSEC(200));                 /* Hold in reset */
-        gpio_pin_set_dt(&data->reset_gpio, 0); /* Release reset (low) */
-        k_sleep(K_SECONDS(1));                /* Allow module to boot */
-    }
-    
-    /* Initialize networking components */
-    LOG_INF("Initializing network components");
-    emw3080_mgmt_init();
-    extern void emw3080_l2_init(void);
-    emw3080_l2_init();
-    
-    LOG_INF("EMW3080 delayed initialization complete");
+    /* No operation: the device is already initialized in emw3080_init() */
     return 0;
 }
 

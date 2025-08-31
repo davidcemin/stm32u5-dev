@@ -88,7 +88,7 @@ static int emw3080_spi_send_frame(const struct device *dev,
     /* Prepare SPI header */
     header.type = EMW3080_SPI_WRITE;
     header.len = sys_cpu_to_le16(len);
-    header.lenx = sys_cpu_to_le16(len);
+    header.lenx = sys_cpu_to_le16((uint16_t)(len ^ 0xFFFF));
     
     /* Copy header and data to transmit buffer */
     memcpy(tx_buffer, &header, sizeof(header));
@@ -117,9 +117,10 @@ static int emw3080_spi_receive_frame(const struct device *dev,
     uint8_t rx_buffer[sizeof(header) + EMW3080_IPC_PAYLOAD_SIZE];
     
     /* Prepare read command header */
-    header.type = EMW3080_SPI_READ;
-    header.len = 0;
-    header.lenx = 0;
+    /* Poll header follows MXWIFI pattern: host sends WRITE with len=0 and lenx=~len */
+    header.type = EMW3080_SPI_WRITE;
+    header.len = sys_cpu_to_le16(0);
+    header.lenx = sys_cpu_to_le16(0xFFFF);
     memcpy(tx_buffer, &header, sizeof(header));
     
     /* Perform SPI transfer to read response */

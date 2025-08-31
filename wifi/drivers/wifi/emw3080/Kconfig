@@ -35,6 +35,28 @@ config EMW3080_INIT_LOG_LEVEL
 	  Per-module log level for emw3080_init.
 	  0=NONE, 1=ERR, 2=WRN, 3=INF, 4=DBG.
 
+config EMW3080_SPI_HOLD_ON_CS
+	bool "Keep CS asserted across header+payload read"
+	default y
+	help
+	  When enabled, the driver keeps chip-select asserted while reading
+	  the header and then the payload in two back-to-back SPI transfers.
+	  Some modules require continuous CS for a full frame.
+
+config EMW3080_SPI_MODE3
+		bool "Use SPI Mode 3 (CPOL=1, CPHA=1)"
+		default n
+		help
+			Force SPI mode 3 if the target hardware requires it. Normally the
+			default is mode 0; this overrides it in the driver unless DTS sets it.
+
+config EMW3080_SPI_FREQ_HZ
+		int "SPI frequency (Hz)"
+		default 8000000
+		range 500000 20000000
+		help
+			Override SPI frequency for EMW3080 if DTS frequency is not set.
+
 config EMW3080_RX_STACK_SIZE
 	int "Stack size for EMW3080 RX handler"
 	default 1024

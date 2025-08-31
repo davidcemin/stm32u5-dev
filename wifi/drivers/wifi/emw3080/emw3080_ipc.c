@@ -66,6 +66,13 @@ int emw3080_ipc_send_command(const struct device *dev, uint16_t api_id,
     
     /* Send command via SPI with MX WiFi framing (not SLIP) */
     int ret = emw3080_spi_send_frame(spi_dev, tx_buffer, total_size);
+    if (ret == -EAGAIN) {
+        /* Peer wants to send first: drain one frame and retry once */
+        uint8_t drain_buf[MIPC_PKT_MAX_SIZE];
+        size_t drain_len = 0;
+        (void)emw3080_spi_recv_frame(spi_dev, drain_buf, sizeof(drain_buf), &drain_len);
+        ret = emw3080_spi_send_frame(spi_dev, tx_buffer, total_size);
+    }
     if (ret != 0) {
         LOG_ERR("Failed to send MIPC command: %d", ret);
         k_mutex_unlock(&data->spi_mutex);
@@ -76,10 +83,17 @@ int emw3080_ipc_send_command(const struct device *dev, uint16_t api_id,
     uint8_t rx_buffer[MIPC_PKT_MAX_SIZE];
     size_t received_len = 0;
     int poll_attempts = 0;
-    const int max_poll_attempts = 50; /* 5 seconds at 100ms intervals */
-    
+    /* Use provided timeout to drive polling cadence */
+    int64_t timeout_ms = k_ticks_to_ms_floor64(timeout.ticks);
+    if (timeout_ms <= 0) {
+        timeout_ms = 2000; /* default 2s */
+    }
+    int initial_wait_ms = MIN(400, (int)timeout_ms / 8); /* small processing window */
+    int poll_interval_ms = 50;
+    int max_poll_attempts = MAX(1, (int)(timeout_ms / poll_interval_ms));
+
     /* Give the module time to process the command */
-    k_sleep(K_MSEC(200));
+    k_sleep(K_MSEC(initial_wait_ms));
     
     /* Poll for response */
     do {
@@ -88,17 +102,31 @@ int emw3080_ipc_send_command(const struct device *dev, uint16_t api_id,
             LOG_DBG("Received response after %d poll attempts", poll_attempts);
             break;
         }
+        static int dbg_hdr_once;
+        if (!dbg_hdr_once && (poll_attempts == 0)) {
+            /* First poll didn't get data; help debug by reading just the header once */
+            struct emw3080_spi_header hdr = {0};
+            uint8_t txh[sizeof(hdr)] = { EMW3080_SPI_WRITE, 0x00, 0x00, 0xFF, 0xFF, 0, 0, 0 };
+            int r = emw3080_spi_transceive(spi_dev, txh, sizeof(txh), (uint8_t *)&hdr, sizeof(hdr));
+            if (r == 0) {
+                uint16_t l = sys_le16_to_cpu(hdr.len);
+                uint16_t lx = sys_le16_to_cpu(hdr.lenx);
+                LOG_INF("SPI hdr peek: type=0x%02x len=%04x lenx=%04x", hdr.type, l, lx);
+            }
+            dbg_hdr_once = 1;
+        }
         
         poll_attempts++;
         if (poll_attempts < max_poll_attempts) {
-            k_sleep(K_MSEC(100));
+            k_sleep(K_MSEC(poll_interval_ms));
         }
     } while (poll_attempts < max_poll_attempts);
     
     if (ret != 0 || received_len == 0) {
-        LOG_ERR("Failed to receive MIPC response after %d attempts: %d", poll_attempts, ret);
+        int final_err = (received_len == 0) ? -ETIMEDOUT : ret;
+        LOG_ERR("Failed to receive MIPC response after %d attempts: %d", poll_attempts, final_err);
         k_mutex_unlock(&data->spi_mutex);
-        return ret != 0 ? ret : -ETIMEDOUT;
+        return final_err;
     }
     
     /* Parse response */
@@ -126,7 +154,7 @@ int emw3080_ipc_send_command(const struct device *dev, uint16_t api_id,
 
 int emw3080_ipc_init(const struct device *dev) 
 {
-    LOG_INF("Initializing EMW3080 IPC layer");
+    LOG_INF("Initializing EMW3080 IPC layer (MIPC over SPI)");
     
     const struct device *spi_dev = get_spi_device(dev);
     if (!spi_dev) {
@@ -316,7 +344,7 @@ int emw3080_ipc_get_mac(const struct device *dev, uint8_t *mac)
     int ret = emw3080_ipc_send_command(dev, MIPC_API_WIFI_GET_MAC_CMD,
                                       NULL, 0,
                                       mac, 6,
-                                      K_SECONDS(2));
+                                      K_SECONDS(5));
     if (ret != 0) {
         LOG_ERR("Failed to get MAC address: %d", ret);
         return ret;
@@ -342,5 +370,45 @@ int emw3080_ipc_set_bypass_mode(const struct device *dev, bool enabled)
     }
     
     LOG_INF("Bypass mode set successfully");
+    return 0;
+}
+
+int emw3080_ipc_echo(const struct device *dev, const char *msg, char *out, size_t out_len)
+{
+    if (!msg || !out || out_len == 0) return -EINVAL;
+    int ret = emw3080_ipc_send_command(dev, MIPC_API_SYS_ECHO_CMD,
+                                      msg, strlen(msg),
+                                      out, out_len - 1,
+                                      K_SECONDS(2));
+    if (ret) return ret;
+    out[out_len - 1] = '\0';
+    return 0;
+}
+
+int emw3080_ipc_get_ip(const struct device *dev, uint8_t ip_out[4])
+{
+    if (!ip_out) return -EINVAL;
+    uint8_t buf[16] = {0};
+    int ret = emw3080_ipc_send_command(dev, MIPC_API_WIFI_GET_IP_CMD,
+                                      NULL, 0,
+                                      buf, sizeof(buf),
+                                      K_SECONDS(3));
+    if (ret) return ret;
+    /* Assume first 4 bytes hold IPv4 address in binary */
+    memcpy(ip_out, buf, 4);
+    return 0;
+}
+
+int emw3080_ipc_get_linkinfo(const struct device *dev, uint8_t *buf, size_t buf_len, size_t *out_len)
+{
+    if (!buf || buf_len == 0) return -EINVAL;
+    size_t rcv_len = 0;
+    int ret = emw3080_ipc_send_command(dev, 0x0108 /* MIPC_API_WIFI_GET_LINKINFO_CMD */,
+                                      NULL, 0,
+                                      buf, buf_len,
+                                      K_SECONDS(3));
+    if (ret) return ret;
+    /* We don't know exact size; caller inspects content */
+    if (out_len) *out_len = rcv_len; /* currently 0, would require send_command to return size */
     return 0;
 }

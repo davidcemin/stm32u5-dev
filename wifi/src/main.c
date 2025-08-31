@@ -33,8 +33,7 @@ int main(void)
         return -ENODEV;
     }
 
-    /* Optional: perform delayed HW init (reset/power sequence) */
-    (void)emw3080_delayed_init();
+    /* Device is initialized by the driver at POST_KERNEL; avoid extra resets here */
 
     /* Query firmware version */
     char version[64] = {0};
@@ -53,6 +52,22 @@ int main(void)
                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     } else {
         LOG_WRN("Failed to read MAC (%d)", ret);
+    }
+
+    /* Try echo */
+    char echo_out[32] = {0};
+    if (emw3080_ipc_echo(dev, "PING", echo_out, sizeof(echo_out)) == 0) {
+        LOG_INF("Echo: %s", echo_out);
+    } else {
+        LOG_WRN("Echo failed");
+    }
+
+    /* Try get IP */
+    uint8_t ip[4] = {0};
+    if (emw3080_ipc_get_ip(dev, ip) == 0) {
+        LOG_INF("IP: %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+    } else {
+        LOG_WRN("Get IP failed");
     }
 
     LOG_INF("Bring-up complete. Idling...");

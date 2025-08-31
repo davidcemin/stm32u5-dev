@@ -62,7 +62,7 @@ int emw3080_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
 {
     int ret;
     
-    LOG_INF("EMW3080: Initiating WiFi scan using SLIP-enhanced IPC");
+    LOG_INF("EMW3080: Initiating WiFi scan via MIPC over SPI");
     
     /* Convert Zephyr scan params to EMW3080 IPC format */
     enum emw3080_scan_mode mode = EMW3080_SCAN_ACTIVE;
@@ -72,7 +72,7 @@ int emw3080_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
         ssid = params->ssids[0];  /* Use first SSID if provided */
     }
     
-    /* Call the SLIP-enhanced IPC scan function */
+    /* Call the MIPC-over-SPI scan function */
     ret = emw3080_ipc_scan(dev, mode, ssid);
     if (ret != 0) {
         LOG_ERR("EMW3080: WiFi scan failed: %d", ret);
@@ -133,7 +133,7 @@ int emw3080_mgmt_connect(const struct device *dev,
     int ret;
     struct emw3080_connect_params ipc_params;
     
-    LOG_INF("EMW3080: Connecting to WiFi network '%s' using SLIP-enhanced IPC", 
+    LOG_INF("EMW3080: Connecting to WiFi network '%s' via MIPC over SPI", 
             params->ssid ? (char *)params->ssid : "(null)");
     
     if (!params || !params->ssid || params->ssid_length == 0) {
@@ -162,7 +162,7 @@ int emw3080_mgmt_connect(const struct device *dev,
     /* Store connection parameters for status tracking */
     memcpy(&current_connection, params, sizeof(current_connection));
     
-    /* Call the SLIP-enhanced IPC connect function */
+    /* Call the MIPC-over-SPI connect function */
     ret = emw3080_ipc_connect(dev, &ipc_params);
     if (ret != 0) {
         LOG_ERR("EMW3080: WiFi connection failed: %d", ret);
@@ -175,9 +175,9 @@ int emw3080_mgmt_connect(const struct device *dev,
 
 int emw3080_mgmt_disconnect(const struct device *dev)
 {
-    LOG_INF("EMW3080: Disconnecting from WiFi network using SLIP-enhanced IPC");
+    LOG_INF("EMW3080: Disconnecting from WiFi network via MIPC over SPI");
     
-    /* Call the SLIP-enhanced IPC disconnect function */
+    /* Call the MIPC-over-SPI disconnect function */
     int ret = emw3080_ipc_disconnect(dev);
     if (ret != 0) {
         LOG_ERR("EMW3080: WiFi disconnection failed: %d", ret);
@@ -233,7 +233,7 @@ int emw3080_mgmt_get_scan_results(struct wifi_scan_result *results, int max_resu
 
 int emw3080_mgmt_init(const struct device *dev)
 {
-    LOG_INF("EMW3080: Initializing management interface with SLIP protocol support");
+    LOG_INF("EMW3080: Initializing management interface (MIPC over SPI)");
     
     /* Initialize status */
     memset(&current_status, 0, sizeof(current_status));

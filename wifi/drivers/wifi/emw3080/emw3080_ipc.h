@@ -117,4 +117,9 @@ int emw3080_ipc_connect(const struct device *dev,
 int emw3080_ipc_disconnect(const struct device *dev);
 int emw3080_ipc_set_bypass_mode(const struct device *dev, bool enabled);
 
+/* Simple diagnostics */
+int emw3080_ipc_echo(const struct device *dev, const char *msg, char *out, size_t out_len);
+int emw3080_ipc_get_ip(const struct device *dev, uint8_t ip_out[4]);
+int emw3080_ipc_get_linkinfo(const struct device *dev, uint8_t *buf, size_t buf_len, size_t *out_len);
+
 #endif /* EMW3080_IPC_H */

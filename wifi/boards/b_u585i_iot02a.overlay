@@ -37,7 +37,7 @@
     emw3080: emw3080@0 {
         compatible = "mxchip,emw3080";
         reg = <0>;
-        spi-max-frequency = <20000000>;  /* 20 MHz SPI clock */
+    spi-max-frequency = <20000000>;  /* 20 MHz SPI clock */
         
         /* GPIO control pins for EMW3080B */
         reset-gpios = <&gpiof 15 GPIO_ACTIVE_LOW>;   /* PF15 Reset */
