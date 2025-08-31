@@ -4,25 +4,16 @@
     {
   "label": "OpenOCD (B-U585I-IOT02A)",
   "type": "shell",
-  "command": "openocd",
+  "command": "bash",
   "args": [
-    "-f",
-    "${env:ZEPHYR_BASE}/boards/st/b_u585i_iot02a/support/openocd.cfg"
+    "-c",
+    "source ~/proj/zephyr/zephyr-env/workspace/zephyr/zephyr-env.sh && openocd -f ${ZEPHYR_BASE}/boards/st/b_u585i_iot02a/support/openocd.cfg"
   ],
   "isBackground": true,
-  "problemMatcher": {
-    "pattern": [
-      {
-        "regexp": ".",
-        "file": 1,
-        "message": 0
-      }
-    ],
-    "background": {
-      "activeOnStart": true,
-      "beginsPattern": ".*Open On-Chip Debugger.*",
-      "endsPattern": ".*Listening on port 3333 for gdb connections.*"
-    }
+  "problemMatcher": [],
+  "presentation": {
+    "reveal": "always",
+    "panel": "dedicated"
   }
 },
 
