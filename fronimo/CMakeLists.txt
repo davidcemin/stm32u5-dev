@@ -8,4 +8,5 @@ project(fronimo)
 target_sources(app PRIVATE  src/main.cpp
                             src/sensors/hts221.cpp
                             src/sensors/iis2mdc.cpp
+                            src/sensors/ism330dhcx.cpp
 )
