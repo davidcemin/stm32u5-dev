@@ -1,0 +1,109 @@
+/* b_u585i_iot02a.overlay
+ *
+ * Zephyr devicetree overlay for ST B-U585I-IOT02A
+ * Enables I2C2 MEMS/environment sensors, secure element,
+ * EEPROM, and dual digital microphones (PDM via MDF/ADF).
+ */
+
+/ {
+	chosen {
+		zephyr,console = &usart1;
+	};
+};
+
+/* --- I2C2 sensor cluster --- */
+&i2c2 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_STANDARD>; /* 100 kHz */
+
+    // Humidity & Temperature Sensor
+	hts221@5f {
+		compatible = "st,hts221";
+		reg = <0x5f>;
+		label = "HTS221";
+	};
+
+    // Magnetometer
+	iis2mdc@1e {
+		compatible = "st,iis2mdc";
+		reg = <0x1e>;
+		label = "IIS2MDC";
+		int-gpios = <&gpiod 10 GPIO_ACTIVE_HIGH>; /* PD10 */
+	};
+
+    // Accelerometer + Gyroscope
+	ism330dhcx@6b {
+		compatible = "st,ism330dhcx";
+		reg = <0x6b>;
+		label = "ISM330DHCX";
+		int1-gpios = <&gpioe 11 GPIO_ACTIVE_HIGH>; /* PE11 */
+	};
+
+    // Pressure Sensor
+	lps22hh@5d {
+		compatible = "st,lps22hh";
+		reg = <0x5d>;
+		label = "LPS22HH";
+		drdy-gpios = <&gpiog 2 GPIO_ACTIVE_HIGH>; /* PG2 */
+	};
+
+    // ToF Sensor
+	vl53l5cx@29 {
+		compatible = "st,vl53l5cx";
+		reg = <0x29>;
+		label = "VL53L5CX";
+		xshut-gpios = <&gpioh 1 GPIO_ACTIVE_LOW>; /* PH1 */
+		int-gpios   = <&gpiog 5 GPIO_ACTIVE_HIGH>; /* PG5 */
+	};
+
+    // Ambient Light Sensor
+	veml6030@10 {
+		compatible = "vishay,veml6030";
+		reg = <0x10>;
+		label = "VEML6030";
+	};
+
+    // Secure Element
+	stsafe@20 {
+		compatible = "st,stsafe-a110";
+		reg = <0x20>;
+		label = "STSAFE_A110";
+		enable-gpios = <&gpiof 11 GPIO_ACTIVE_LOW>; /* PF11 */
+	};
+
+    // EEPROM
+	eeprom@57 {
+		compatible = "st,24c02"; /* or st,24c256 depending on binding */
+		reg = <0x57>;
+		label = "M24256_EEPROM";
+	};
+};
+
+/* --- Digital microphones --- */
+/ {
+	sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "PDM MEMS Mics";
+		simple-audio-card,bitclock-master = <&dailink0_master>;
+		simple-audio-card,frame-master = <&dailink0_master>;
+
+		dailink0_master: simple-audio-card,cpu {
+			sound-dai = <&mdf1>;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&pdmic1>;
+		};
+	};
+};
+
+&mdf1 {
+	status = "okay";
+};
+
+&pdmic1 {
+	status = "okay";
+	/* Mic1: PE9 (CLK0), PE10 (SDINx)
+	 * Mic2: PF10 (CLK1), PB1 (SDIN0)
+	 */
+};
