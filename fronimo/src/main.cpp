@@ -5,7 +5,7 @@
 #include "sensors/iis2mdc.h"
 #include "sensors/ism330dhcx.h"
 #include "sensors/lps22hh.h"
-// #include "sensors/vl53l5cx.h" // Disabled - driver under development
+#include "sensors/vl53l5cx.h"
 
 LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
 
@@ -16,6 +16,7 @@ int main(void) {
     IIS2MDC mag;
     ISM330DHCX imu;
     LPS22HH lps;
+    VL53L5CX tof;
     // VL53L5CX tof; // Disabled - driver under development
 
     if (!hts.isReady()) {
@@ -36,10 +37,9 @@ int main(void) {
         return 0;
     }
 
-    // VL53L5CX ToF sensor disabled for now
-    // if(!tof.isReady()) {
-    //     LOG_WRN("VL53L5CX not available (expected - driver being built)");
-    // }
+    if(!tof.isReady()) {
+        LOG_WRN("VL53L5CX not available (expected until physical sensor connected)");
+    }
 
     lps.setMode(LPS22HH::Mode::ONE_SHOT);
 
@@ -94,12 +94,11 @@ int main(void) {
                     (int)temperature, (int)((temperature - (int)temperature) * 100));
         }
 
-        // VL53L5CX disabled for now
-        // if(tof.isReady() && tof.sample()) {
-        //     float distance = tof.getDistance();
-        //     LOG_INF("Distance: %d.%02d mm",
-        //             (int)distance, (int)((distance - (int)distance) * 100));
-        // }
+        if(tof.isReady() && tof.sample()) {
+            float distance = tof.getDistance();
+            LOG_INF("Distance: %d.%02d mm",
+                    (int)distance, (int)((distance - (int)distance) * 100));
+        }
         LOG_INF("-------------------------------------------------------------------");
         
         k_sleep(K_SECONDS(2));

@@ -20,7 +20,6 @@ static void vl53l5cx_gpio_callback(const struct device *dev,
 				   uint32_t pins)
 {
 	struct vl53l5cx_data *data = CONTAINER_OF(cb, struct vl53l5cx_data, gpio_cb);
-	const struct device *sensor = data->dev;
 	
 	ARG_UNUSED(dev);
 	ARG_UNUSED(pins);

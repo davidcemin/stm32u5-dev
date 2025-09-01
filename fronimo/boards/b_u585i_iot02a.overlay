@@ -45,7 +45,7 @@
 	};
 
     // ToF Sensor (Custom driver - under development)
-	vl53l5cx@29 {
+	vl53l5cx: vl53l5cx@29 {
 		compatible = "st,vl53l5cx";
 		reg = <0x29>;
 		label = "VL53L5CX";

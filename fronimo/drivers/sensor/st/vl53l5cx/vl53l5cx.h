@@ -18,17 +18,9 @@
 #define VL53L5CX_REVISION_ID		0x0001
 #define VL53L5CX_STATUS				0x0006
 #define VL53L5CX_COMMAND			0x0007
-#define VL53L5CX_GPIO_HV_MUX_CTRL	0x0030
-#define VL53L5CX_GPIO_TIO_HV_STATUS	0x0031
 #define VL53L5CX_SYSTEM_START		0x0087
-#define VL53L5CX_RESULT_RANGE_STATUS	0x0089
-#define VL53L5CX_RESULT_SPAD_NB		0x008C
-#define VL53L5CX_RESULT_SIGNAL_RATE	0x008E
-#define VL53L5CX_RESULT_AMBIENT_RATE	0x0090
-#define VL53L5CX_RESULT_SIGMA		0x0092
 #define VL53L5CX_RESULT_DISTANCE	0x0096
-#define VL53L5CX_RESULT_OSC_CALIBRATE_VAL	0x00DE
-#define VL53L5CX_FIRMWARE_SYSTEM_STATUS		0x00E5
+#define VL53L5CX_FIRMWARE_SYSTEM_STATUS	0x00E5
 
 /* VL53L5CX constants */
 #define VL53L5CX_DEVICE_ID_VAL		0xF0
@@ -94,7 +86,7 @@ struct vl53l5cx_data {
 #ifdef CONFIG_VL53L5CX_TRIGGER
 	const struct device *gpio_dev;
 	struct gpio_callback gpio_cb;
-	sensor_trigger_handler_t trigger_handler;
+	sensor_trigger_handler_t data_ready_handler;
 	const struct sensor_trigger *trigger;
 	
 #if defined(CONFIG_VL53L5CX_TRIGGER_OWN_THREAD)
@@ -124,16 +116,7 @@ int vl53l5cx_trigger_set(const struct device *dev,
 int vl53l5cx_init_interrupt(const struct device *dev);
 #endif
 
-/* Internal helper functions */
-static int vl53l5cx_i2c_read(const struct device *dev, uint16_t reg,
-			     uint8_t *data, uint16_t len);
-static int vl53l5cx_i2c_write(const struct device *dev, uint16_t reg,
-			      const uint8_t *data, uint16_t len);
-static int vl53l5cx_set_resolution(const struct device *dev, uint8_t resolution);
-static int vl53l5cx_set_ranging_freq(const struct device *dev, uint8_t freq);
-static int vl53l5cx_start_ranging(const struct device *dev);
-static int vl53l5cx_stop_ranging(const struct device *dev);
-static int vl53l5cx_check_data_ready(const struct device *dev);
-static int vl53l5cx_read_results(const struct device *dev);
+/* Internal helper functions - declared for trigger file usage */
+int vl53l5cx_read_results(const struct device *dev);
 
 #endif /* ZEPHYR_DRIVERS_SENSOR_VL53L5CX_VL53L5CX_H_ */

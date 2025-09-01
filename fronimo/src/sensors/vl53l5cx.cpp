@@ -4,7 +4,7 @@
 LOG_MODULE_REGISTER(vl53l5cx_cpp, LOG_LEVEL_INF);
 
 VL53L5CX::VL53L5CX()
-    : dev_(DEVICE_DT_GET_ANY(st_vl53l5cx)), distance_(0.0f)
+    : dev_(DEVICE_DT_GET(DT_NODELABEL(vl53l5cx))), distance_(0.0f)
 {
     if (!device_is_ready(dev_)) {
         LOG_ERR("VL53L5CX device not ready");
