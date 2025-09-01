@@ -105,6 +105,24 @@
 		filter-order = <5>;
 		gain = <0>; /* 0 dB */
 	};
+	
+	/* MDF1 peripheral device node */
+	mdf1_filter0: mdf@40c20000 {
+		compatible = "st,stm32-mdf";
+		reg = <0x40c20000 0x400>;
+		interrupts = <160 0>;  /* MDF1_FLT0 interrupt */
+		interrupt-parent = <&nvic>;
+		clocks = <&rcc STM32_CLOCK_BUS_AHB1 0x800>; /* MDF1EN bit 11 */
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		
+		/* Filter configuration */
+		st,filter-id = <0>;
+		st,channels = <2>;
+		st,sample-rate = <16000>;
+		st,decimation-ratio = <64>;
+	};
 };
 
 /* The MP23DB01HPTR microphones are connected to:

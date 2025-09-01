@@ -13,7 +13,8 @@ LOG_MODULE_REGISTER(pdm_mics_cpp, LOG_LEVEL_INF);
 /* Device tree node for PDM microphones */
 #define PDM_NODE DT_ALIAS(pdm_mic)
 /* Try to get the MDF device if available */
-#if DT_NODE_EXISTS(DT_NODELABEL(mdf1_filter0))
+/* TODO: Fix device tree symbol generation for MDF device */
+#if 0  // Temporarily disabled until device instantiation is fixed
 #define MDF_DEVICE DEVICE_DT_GET(DT_NODELABEL(mdf1_filter0))
 #else
 #define MDF_DEVICE NULL
