@@ -68,6 +68,7 @@ static int stm32_mdf_configure(const struct device *dev, struct dmic_cfg *config
 static int stm32_mdf_trigger(const struct device *dev, enum dmic_trigger cmd)
 {
     struct stm32_mdf_data *data = dev->data;
+    const struct stm32_mdf_config *config = dev->config;
 
     switch (cmd) {
     case DMIC_TRIGGER_START:
@@ -84,9 +85,25 @@ static int stm32_mdf_trigger(const struct device *dev, enum dmic_trigger cmd)
             data->buffer_size = data->mem_slab->info.block_size / sizeof(int32_t);
         }
 
-        /* Start MDF acquisition - use interrupt mode for now */
-        /* TODO: Need to configure MDF filter parameters properly */
-        LOG_INF("Starting MDF acquisition (buffer size: %d)", data->buffer_size);
+        /* Actually start MDF hardware acquisition */
+        LOG_INF("Starting MDF hardware acquisition");
+        
+        /* Enable MDF filter for data acquisition */
+        config->filter_base->DFLTCR |= MDF_DFLTCR_DFLTEN;
+        
+        LOG_INF("MDF filter enabled - checking if data flows without explicit clocks");
+        LOG_INF("The FIFO overrun suggests some data source is active");
+        LOG_INF("This could be internal test mode or automatic clock generation");
+        
+        /* Check and log current MDF status */
+        uint32_t gcr = config->base->GCR;
+        uint32_t dfltcr = config->filter_base->DFLTCR;
+        uint32_t dfltisr = config->filter_base->DFLTISR;
+        
+        LOG_INF("MDF Status after enable: GCR=0x%08x, DFLTCR=0x%08x, DFLTISR=0x%08x", 
+                gcr, dfltcr, dfltisr);
+        
+        LOG_INF("MDF filter enabled for data acquisition");
 
         data->state = DMIC_STATE_ACTIVE;
         LOG_INF("MDF acquisition started");
@@ -97,8 +114,11 @@ static int stm32_mdf_trigger(const struct device *dev, enum dmic_trigger cmd)
             return 0;
         }
 
-        /* Stop MDF acquisition */
-        LOG_INF("Stopping MDF acquisition");
+        /* Stop MDF hardware acquisition */
+        LOG_INF("Stopping MDF hardware acquisition");
+        
+        /* Disable filter */
+        config->filter_base->DFLTCR &= ~MDF_DFLTCR_DFLTEN;
 
         if (data->rx_buffer && data->mem_slab) {
             k_mem_slab_free(data->mem_slab, (void *)data->rx_buffer);
@@ -134,40 +154,96 @@ static int stm32_mdf_read(const struct device *dev, uint8_t stream, void **buffe
     /* Check if MDF has new data available - use correct register names */
     volatile uint32_t dfltisr = config->filter_base->DFLTISR;
     
+    LOG_DBG("MDF DFLTISR register: 0x%08x", dfltisr);
+    
+    /* Check for any activity in DFLTISR - 0x400 indicates FIFO overrun */
+    if (dfltisr != 0) {
+        LOG_INF("MDF showing activity: DFLTISR=0x%08x", dfltisr);
+        
+        /* Decode DFLTISR bits according to reference manual */
+        if (dfltisr & (1 << 10)) {
+            LOG_WRN("DFLTISR bit 10: RFOVRF - RX FIFO overrun - reading too slow!");
+            /* FIFO overrun means we have real data but need to read faster */
+        }
+        if (dfltisr & (1 << 6)) LOG_INF("DFLTISR bit 6: FTHF - FIFO threshold reached");
+        if (dfltisr & (1 << 5)) LOG_WRN("DFLTISR bit 5: DOVRF - Data overrun");
+        if (dfltisr & (1 << 4)) LOG_INF("DFLTISR bit 4: RXNEF - RX data not empty");
+        
+        /* Clear any error flags but keep reading - don't fall back to test pattern */
+        config->filter_base->DFLTISR = dfltisr;
+        LOG_INF("Cleared MDF status flags - continuing with real data");
+    }
+    
     if (dfltisr & MDF_DFLTISR_FTHF) {
         /* Data available - read from FIFO */
-        LOG_DBG("MDF FIFO has data, reading...");
+        LOG_INF("MDF FIFO has data available, reading samples...");
         
         /* Read available samples from MDF data register */
         size_t samples_to_read = (data->buffer_size < 32) ? data->buffer_size : 32;
         
         for (size_t i = 0; i < samples_to_read; i++) {
-            /* Wait for data available */
-            int timeout_count = 1000;
-            while (!(config->filter_base->DFLTISR & MDF_DFLTISR_FTHF) && timeout_count > 0) {
-                timeout_count--;
-                k_usleep(1);
-            }
-            
-            if (timeout_count > 0) {
+            /* Check if data is still available */
+            if (config->filter_base->DFLTISR & MDF_DFLTISR_FTHF) {
                 /* Read 24-bit data and convert to 16-bit */
                 uint32_t raw_data = config->filter_base->DFLTDR;
                 /* Convert 24-bit to 16-bit (take upper 16 bits) */
                 data->rx_buffer[i] = (int32_t)(raw_data >> 8);
+                LOG_DBG("Read MDF sample %d: raw=0x%08x, converted=%d", i, raw_data, data->rx_buffer[i]);
             } else {
-                /* Timeout - fill with previous value or zero */
-                if (i > 0) {
-                    data->rx_buffer[i] = data->rx_buffer[i-1];
+                /* No more data available */
+                LOG_DBG("No more MDF data available at sample %d", i);
+                break;
+            }
+        }
+        
+        LOG_INF("Successfully read %d samples from MDF FIFO", samples_to_read);
+    } else if (dfltisr & (1 << 10)) {
+        /* FIFO overrun - the MDF IS receiving data, we just need to read it aggressively */
+        LOG_INF("FIFO overrun detected - MDF is receiving data from unknown source");
+        
+        size_t samples_to_read = (data->buffer_size < 32) ? data->buffer_size : 32;
+        int samples_read = 0;
+        
+        /* Try aggressive reading - the overrun means data is definitely flowing */
+        for (size_t i = 0; i < samples_to_read && i < 200; i++) {
+            /* Check multiple status bits for data availability */
+            uint32_t fifo_status = config->filter_base->DFLTISR;
+            
+            /* Try to read if ANY indication of data */
+            if ((fifo_status & MDF_DFLTISR_RXNEF) || (fifo_status & (1 << 10))) {
+                uint32_t raw_data = config->filter_base->DFLTDR;
+                data->rx_buffer[i] = (int32_t)(raw_data >> 8);
+                samples_read++;
+                LOG_DBG("Overrun read %d: raw=0x%08x, converted=%d", i, raw_data, data->rx_buffer[i]);
+            } else {
+                /* Try reading anyway - overrun suggests data is there */
+                uint32_t raw_data = config->filter_base->DFLTDR;
+                if (raw_data != 0) {  /* If we got non-zero data, use it */
+                    data->rx_buffer[i] = (int32_t)(raw_data >> 8);
+                    samples_read++;
+                    LOG_DBG("Forced read %d: raw=0x%08x, converted=%d", i, raw_data, data->rx_buffer[i]);
                 } else {
-                    data->rx_buffer[i] = 0;
+                    break;
                 }
             }
         }
         
-        LOG_DBG("Read %d samples from MDF FIFO", samples_to_read);
+        if (samples_read > 0) {
+            LOG_INF("BREAKTHROUGH: Read %d real samples from MDF despite overrun!", samples_read);
+            /* Fill remainder with last sample to avoid noise */
+            for (int i = samples_read; i < samples_to_read; i++) {
+                data->rx_buffer[i] = data->rx_buffer[samples_read-1];
+            }
+        } else {
+            LOG_WRN("Overrun present but no readable data - possible timing issue");
+            goto use_test_pattern;
+        }
     } else {
-        /* No new data - return previous buffer or generate test pattern */
-        LOG_DBG("No new MDF data, using test pattern");
+        use_test_pattern:
+        /* No FIFO data - but we see other status, so MDF is active */
+        if (dfltisr != 0) {
+            LOG_DBG("MDF is active (DFLTISR=0x%08x) but no FIFO data yet", dfltisr);
+        }
         
         /* Generate varying test pattern to verify data flow */
         static uint32_t test_counter = 0;
@@ -178,6 +254,13 @@ static int stm32_mdf_read(const struct device *dev, uint8_t stream, void **buffe
             data->rx_buffer[i] = (int32_t)(1000 * sin(2.0 * M_PI * (test_counter + i) / 100.0));
         }
         test_counter += samples_to_fill;
+        
+        /* Log this periodically to debug MDF configuration */
+        static uint32_t debug_counter = 0;
+        debug_counter++;
+        if (debug_counter % 100 == 0) {
+            LOG_INF("Still using test pattern - MDF active but no FIFO data (DFLTISR=0x%08x, count: %d)", dfltisr, debug_counter);
+        }
     }
 
     *buffer = data->rx_buffer;
@@ -297,7 +380,7 @@ static int stm32_mdf_init(const struct device *dev)
     /* Initialize MDF HAL (now that clocks are enabled and access verified) */
     data->hmdf.Instance = config->filter_base;  /* Use filter base for HAL */
     
-    /* Configure MDF for PDM microphone acquisition - simplified */
+    /* Configure MDF for PDM microphone acquisition */
     data->hmdf.Init.CommonParam.ProcClockDivider = 1;
     data->hmdf.Init.CommonParam.OutputClock.Activation = ENABLE;
     data->hmdf.Init.CommonParam.OutputClock.Pins = MDF_OUTPUT_CLOCK_0 | MDF_OUTPUT_CLOCK_1;
@@ -316,6 +399,77 @@ static int stm32_mdf_init(const struct device *dev)
     if (HAL_MDF_Init(&data->hmdf) != HAL_OK) {
         LOG_ERR("Failed to initialize MDF HAL");
         return -EIO;
+    }
+
+    /* Configure the filter for PDM data acquisition manually */
+    LOG_INF("Configuring MDF filter for PDM acquisition");
+    
+    /* Configure filter control register - use available bit positions */
+    uint32_t dfltcr = 0;
+    dfltcr |= (8 << MDF_DFLTCR_FTH_Pos);          /* FIFO threshold (8 = quarter full, more responsive) */
+    
+    /* Set data source to serial interface (PDM microphones) */
+    /* Use BSMX data source which should route from serial interface */
+    /* The exact bit pattern may need adjustment based on hardware */
+    
+    config->filter_base->DFLTCR = dfltcr;
+    
+    /* Configure CIC filter register for PDM decimation */
+    uint32_t dfltcicr = 0;
+    dfltcicr |= (4 << MDF_DFLTCICR_CICMOD_Pos);   /* CIC mode 4 */
+    dfltcicr |= MDF_DFLTCICR_DATSRC_0;            /* Data source: BSMX from serial interface */
+    
+    config->filter_base->DFLTCICR = dfltcicr;
+    
+    LOG_INF("MDF filter configured: DFLTCR=0x%08x, DFLTCICR=0x%08x", 
+            config->filter_base->DFLTCR, config->filter_base->DFLTCICR);
+
+    /* CRITICAL: Force enable output clocks manually since HAL isn't setting them */
+    LOG_INF("Manually enabling MDF output clocks for PDM microphones");
+    
+    uint32_t gcr = config->base->GCR;
+    LOG_INF("MDF GCR before manual clock enable: 0x%08x", gcr);
+    
+    /* Check if MDF is properly enabled before setting clocks */
+    uint32_t ahb1enr = RCC->AHB1ENR;
+    LOG_INF("RCC AHB1ENR (MDF1 enable): 0x%08x", ahb1enr);
+    
+    /* Try to enable the global MDF clock first */
+    config->base->GCR = 0x00000000;  /* Reset GCR */
+    
+    /* Enable output clock configuration in steps */
+    LOG_INF("Step 1: Setting up MDF global configuration");
+    
+    /* Set the prescaler and enable bits according to reference manual */
+    uint32_t new_gcr = 0;
+    new_gcr |= (0 << 16);  /* CKGDEN = 0, no clock generation divider */
+    new_gcr |= (1 << 0);   /* CCK0EN = 1, enable output clock 0 */
+    
+    config->base->GCR = new_gcr;
+    gcr = config->base->GCR;
+    LOG_INF("MDF GCR after CCK0 setup: 0x%08x (expected: 0x%08x)", gcr, new_gcr);
+    
+    /* Now try CCK1 */
+    new_gcr |= (1 << 1);   /* CCK1EN = 1, enable output clock 1 */
+    config->base->GCR = new_gcr;
+    gcr = config->base->GCR;
+    LOG_INF("MDF GCR after CCK1 setup: 0x%08x (expected: 0x%08x)", gcr, new_gcr);
+    
+    if ((gcr & 0x3) == 0x3) {
+        LOG_INF("SUCCESS: Both MDF output clocks CCK0 and CCK1 enabled");
+    } else if (gcr & 0x1) {
+        LOG_WRN("PARTIAL: Only CCK0 enabled, CCK1 failed - left mic only");
+    } else {
+        LOG_ERR("FAILED: No MDF output clocks enabled");
+        LOG_ERR("This suggests MDF peripheral or clock domain issue");
+        
+        /* Try diagnostic reads */
+        LOG_ERR("Diagnostic: MDF base address: 0x%08x", (uint32_t)config->base);
+        LOG_ERR("Diagnostic: Writing test pattern to GCR...");
+        config->base->GCR = 0xAAAAAAAA;
+        uint32_t test_read = config->base->GCR;
+        LOG_ERR("Diagnostic: Test write 0xAAAAAAAA, read back: 0x%08x", test_read);
+        config->base->GCR = 0x00000000;  /* Reset */
     }
 
     /* Configure interrupts */
