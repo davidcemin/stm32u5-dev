@@ -16,8 +16,7 @@ int main(void) {
     IIS2MDC mag;
     ISM330DHCX imu;
     LPS22HH lps;
-    VL53L5CX tof;
-    // VL53L5CX tof; // Disabled - driver under development
+    VL53L5CX tof;  // Hardware detected ✅, measurements require ULD firmware
 
     if (!hts.isReady()) {
         LOG_ERR("HTS221 not available");

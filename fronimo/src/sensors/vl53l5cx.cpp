@@ -23,7 +23,7 @@ bool VL53L5CX::sample() {
 
     int ret = sensor_sample_fetch(dev_);
     if (ret < 0) {
-        LOG_ERR("Failed to fetch VL53L5CX sample, error: %d", ret);
+        LOG_DBG("VL53L5CX sample fetch returned: %d (expected without ULD firmware)", ret);
         return false;
     }
 
@@ -35,7 +35,11 @@ bool VL53L5CX::sample() {
     }
     
     distance_ = val.val1 + (val.val2 / 1000000.0f);
-    LOG_INF("VL53L5CX distance measurement: %d.%02d mm", (int)distance_, (int)((distance_ - (int)distance_) * 100));
+    
+    /* Note: Distance will be 0.00 mm without ULD firmware */
+    if (distance_ == 0.0f) {
+        LOG_DBG("VL53L5CX hardware detected but requires ULD firmware for measurements");
+    }
 
     return true;
 }
