@@ -129,7 +129,5 @@ int vl53l5cx_init_interrupt(const struct device *dev)
 		return ret;
 	}
 	
-	LOG_INF("VL53L5CX interrupt initialized");
-	
 	return 0;
 }

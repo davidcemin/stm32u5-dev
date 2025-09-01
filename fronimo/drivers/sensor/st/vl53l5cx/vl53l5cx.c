@@ -137,7 +137,6 @@ static int vl53l5cx_check_device_id(const struct device *dev)
 		return -ENODEV;
 	}
 	
-	LOG_INF("VL53L5CX sensor detected with ID: 0x%02X", device_id);
 	return 0;
 }
 
@@ -432,14 +431,11 @@ int vl53l5cx_init(const struct device *dev)
 #endif
 	
 	/* Start ranging automatically */
-	LOG_INF("Starting VL53L5CX ranging...");
 	ret = vl53l5cx_start_ranging(dev);
 	if (ret < 0) {
 		LOG_ERR("Failed to start ranging: %d", ret);
 		return ret;
 	}
-	
-	LOG_INF("VL53L5CX initialized successfully");
 	
 	return 0;
 }
