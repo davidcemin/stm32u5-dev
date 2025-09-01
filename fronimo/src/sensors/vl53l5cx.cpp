@@ -17,18 +17,25 @@ bool VL53L5CX::isReady() const {
 
 bool VL53L5CX::sample() {
     if (!isReady()) {
+        LOG_ERR("VL53L5CX device not ready");
         return false;
     }
 
-    if (sensor_sample_fetch(dev_) < 0) {
-        LOG_ERR("Failed to fetch VL53L5CX sample");
+    int ret = sensor_sample_fetch(dev_);
+    if (ret < 0) {
+        LOG_ERR("Failed to fetch VL53L5CX sample, error: %d", ret);
         return false;
     }
 
     struct sensor_value val;
-    if (sensor_channel_get(dev_, SENSOR_CHAN_DISTANCE, &val) == 0) {
-        distance_ = val.val1 + (val.val2 / 1000000.0f);
+    ret = sensor_channel_get(dev_, SENSOR_CHAN_DISTANCE, &val);
+    if (ret < 0) {
+        LOG_ERR("Failed to get VL53L5CX distance channel, error: %d", ret);
+        return false;
     }
+    
+    distance_ = val.val1 + (val.val2 / 1000000.0f);
+    LOG_INF("VL53L5CX distance measurement: %d.%02d mm", (int)distance_, (int)((distance_ - (int)distance_) * 100));
 
     return true;
 }
