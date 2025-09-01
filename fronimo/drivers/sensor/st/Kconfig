@@ -1,0 +1,4 @@
+# ST Sensor Drivers Kconfig
+
+# Include VL53L5CX driver
+rsource "vl53l5cx/Kconfig"

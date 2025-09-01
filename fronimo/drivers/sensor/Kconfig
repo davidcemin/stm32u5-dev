@@ -1,0 +1,8 @@
+# Sensor Drivers Kconfig
+
+menu "Sensor Drivers"
+
+# Include ST sensor drivers
+rsource "st/Kconfig"
+
+endmenu

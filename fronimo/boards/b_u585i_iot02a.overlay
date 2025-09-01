@@ -28,7 +28,6 @@
 		compatible = "st,iis2mdc";
 		reg = <0x1e>;
 		label = "IIS2MDC";
-		int-gpios = <&gpiod 10 GPIO_ACTIVE_HIGH>; /* PD10 */
 	};
 
     // Accelerometer + Gyroscope
@@ -36,7 +35,6 @@
 		compatible = "st,ism330dhcx";
 		reg = <0x6b>;
 		label = "ISM330DHCX";
-		int1-gpios = <&gpioe 11 GPIO_ACTIVE_HIGH>; /* PE11 */
 	};
 
     // Pressure Sensor
@@ -44,10 +42,9 @@
 		compatible = "st,lps22hh";
 		reg = <0x5d>;
 		label = "LPS22HH";
-		drdy-gpios = <&gpiog 2 GPIO_ACTIVE_HIGH>; /* PG2 */
 	};
 
-    // ToF Sensor
+    // ToF Sensor (Custom driver - under development)
 	vl53l5cx@29 {
 		compatible = "st,vl53l5cx";
 		reg = <0x29>;
@@ -56,54 +53,28 @@
 		int-gpios   = <&gpiog 5 GPIO_ACTIVE_HIGH>; /* PG5 */
 	};
 
-    // Ambient Light Sensor
+    /* Ambient Light Sensor - disabled for now
 	veml6030@10 {
 		compatible = "vishay,veml6030";
 		reg = <0x10>;
 		label = "VEML6030";
 	};
+    */
 
-    // Secure Element
+    /* Secure Element - disabled for now
 	stsafe@20 {
 		compatible = "st,stsafe-a110";
-		reg = <0x20>;
+		reg = ;<0x20>;
 		label = "STSAFE_A110";
-		enable-gpios = <&gpiof 11 GPIO_ACTIVE_LOW>; /* PF11 */
+		enable-gpios = <&gpiof 11 GPIO_ACTIVE_LOW>;
 	};
+    */
 
-    // EEPROM
+    /* EEPROM - disabled for now
 	eeprom@57 {
-		compatible = "st,24c02"; /* or st,24c256 depending on binding */
+		compatible = "st,24c02";
 		reg = <0x57>;
 		label = "M24256_EEPROM";
 	};
-};
-
-/* --- Digital microphones --- */
-/ {
-	sound {
-		compatible = "simple-audio-card";
-		simple-audio-card,name = "PDM MEMS Mics";
-		simple-audio-card,bitclock-master = <&dailink0_master>;
-		simple-audio-card,frame-master = <&dailink0_master>;
-
-		dailink0_master: simple-audio-card,cpu {
-			sound-dai = <&mdf1>;
-		};
-
-		simple-audio-card,codec {
-			sound-dai = <&pdmic1>;
-		};
-	};
-};
-
-&mdf1 {
-	status = "okay";
-};
-
-&pdmic1 {
-	status = "okay";
-	/* Mic1: PE9 (CLK0), PE10 (SDINx)
-	 * Mic2: PF10 (CLK1), PB1 (SDIN0)
-	 */
+    */
 };

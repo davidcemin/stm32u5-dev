@@ -1,0 +1,41 @@
+# Copyright (c) 2025 David Cemin
+# SPDX-License-Identifier: Apache-2.0
+
+description: ST VL53L5CX Time-of-Flight sensor
+
+compatible: "st,vl53l5cx"
+
+include: [sensor-device.yaml, i2c-device.yaml]
+
+properties:
+  int-gpios:
+    type: phandle-array
+    description: |
+      The INT signal connection. This signal is an active-high interrupt.
+      
+  xshut-gpios:
+    type: phandle-array
+    description: |
+      The XSHUT signal connection. This signal is an active-low shutdown pin.
+      When driven low, the sensor enters hardware standby mode.
+      
+  resolution:
+    type: int
+    default: 16
+    enum:
+      - 16  # 4x4 zones
+      - 64  # 8x8 zones
+    description: |
+      Number of ranging zones. 16 for 4x4 matrix, 64 for 8x8 matrix.
+      
+  ranging-frequency-hz:
+    type: int
+    default: 10
+    description: |
+      Ranging frequency in Hz. Valid range is 1-60 Hz depending on resolution.
+      
+  integration-time-ms:
+    type: int
+    default: 5
+    description: |
+      Integration time in milliseconds. Affects ranging performance vs power consumption.
