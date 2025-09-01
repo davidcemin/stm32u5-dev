@@ -226,13 +226,19 @@ static int vl53l5cx_check_data_ready(const struct device *dev)
 	uint8_t status;
 	int ret;
 	
-	ret = vl53l5cx_read_byte(dev, VL53L5CX_STATUS, &status);
+	/* Check the GPIO interrupt status register */
+	ret = vl53l5cx_read_byte(dev, VL53L5CX_GPIO_TIO_HV_STATUS, &status);
 	if (ret < 0) {
+		LOG_ERR("Failed to read data ready status: %d", ret);
 		return ret;
 	}
 	
-	/* Data ready when bit 0 is set */
-	return (status & 0x01) ? 1 : 0;
+	LOG_DBG("Data ready status register 0x%04x: 0x%02x", VL53L5CX_GPIO_TIO_HV_STATUS, status);
+	
+	/* Check if data is ready (simplified check) */
+	int ready = (status & 0x01) ? 1 : 0;
+	LOG_DBG("Data ready result: %d", ready);
+	return ready;
 }
 
 int vl53l5cx_read_results(const struct device *dev)
@@ -241,6 +247,8 @@ int vl53l5cx_read_results(const struct device *dev)
 	uint8_t result_data[8];
 	int ret;
 	
+	LOG_DBG("Reading VL53L5CX measurement results...");
+	
 	/* Read basic result data for center zone (simplified) */
 	ret = vl53l5cx_i2c_read(dev, VL53L5CX_RESULT_DISTANCE, result_data, 8);
 	if (ret < 0) {
@@ -248,11 +256,19 @@ int vl53l5cx_read_results(const struct device *dev)
 		return ret;
 	}
 	
+	LOG_DBG("Raw result data: [0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x]",
+		result_data[0], result_data[1], result_data[2], result_data[3],
+		result_data[4], result_data[5], result_data[6], result_data[7]);
+	
 	/* Parse distance (center zone only for simplified implementation) */
 	data->zones[0].distance_mm = (result_data[1] << 8) | result_data[0];
 	data->zones[0].status = result_data[2];
 	data->zones[0].signal_kcps = (result_data[5] << 8) | result_data[4];
 	data->zones[0].ambient_kcps = (result_data[7] << 8) | result_data[6];
+	
+	LOG_INF("Parsed results - Distance: %u mm, Status: 0x%02x, Signal: %u kcps, Ambient: %u kcps",
+		data->zones[0].distance_mm, data->zones[0].status, 
+		data->zones[0].signal_kcps, data->zones[0].ambient_kcps);
 	
 	/* For multi-zone, we would read all zone data here */
 	
@@ -301,7 +317,10 @@ int vl53l5cx_channel_get(const struct device *dev, enum sensor_channel chan,
 {
 	struct vl53l5cx_data *data = dev->data;
 	
+	LOG_DBG("Channel get request: chan=%d, data_ready=%d", (int)chan, data->data_ready);
+	
 	if (!data->data_ready) {
+		LOG_DBG("Data not ready, returning -ENODATA");
 		return -ENODATA;
 	}
 	
@@ -310,6 +329,7 @@ int vl53l5cx_channel_get(const struct device *dev, enum sensor_channel chan,
 		/* Return center zone distance in millimeters */
 		val->val1 = data->zones[0].distance_mm;
 		val->val2 = 0;
+		LOG_DBG("Returning distance: %d mm", data->zones[0].distance_mm);
 		break;
 		
 	case SENSOR_CHAN_VL53L5CX_DISTANCE_ZONE_0:
