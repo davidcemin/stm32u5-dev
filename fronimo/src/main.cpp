@@ -6,6 +6,7 @@
 #include "sensors/ism330dhcx.h"
 #include "sensors/lps22hh.h"
 #include "sensors/vl53l5cx.h"
+#include "sensors/veml6030.h"
 
 LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
 
@@ -17,6 +18,7 @@ int main(void) {
     ISM330DHCX imu;
     LPS22HH lps;
     VL53L5CX tof;  // Hardware detected ✅, measurements require ULD firmware
+    VEML6030 als;
 
     if (!hts.isReady()) {
         LOG_ERR("HTS221 not available");
@@ -38,6 +40,11 @@ int main(void) {
 
     if(!tof.isReady()) {
         LOG_WRN("VL53L5CX not available (expected until physical sensor connected)");
+    }
+
+    if(!als.isReady()) {
+        LOG_ERR("VEML7700 (ALS) not available");
+        return 0;
     }
 
     lps.setMode(LPS22HH::Mode::ONE_SHOT);
@@ -97,6 +104,12 @@ int main(void) {
             float distance = tof.getDistance();
             LOG_INF("Distance: %d.%02d mm",
                     (int)distance, (int)((distance - (int)distance) * 100));
+        }
+
+        if(als.sample()) {
+            float lux = als.getLux();
+            LOG_INF("Ambient Light: %d.%02d lux",
+                    (int)lux, (int)((lux - (int)lux) * 100));
         }
         LOG_INF("-------------------------------------------------------------------");
         

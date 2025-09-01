@@ -52,14 +52,14 @@
 		xshut-gpios = <&gpioh 1 GPIO_ACTIVE_LOW>; /* PH1 */
 		int-gpios   = <&gpiog 5 GPIO_ACTIVE_HIGH>; /* PG5 */
 	};
-
-    /* Ambient Light Sensor - disabled for now
-	veml6030@10 {
-		compatible = "vishay,veml6030";
+	
+	// Override the VEML6030 on the board to use VEML7700 driver with proper PSM
+	veml7700: veml7700@10 {
+		compatible = "vishay,veml7700";
 		reg = <0x10>;
-		label = "VEML6030";
+		psm-mode = <1>; /* Enable PSM mode 1 for continuous operation */
+		status = "okay";
 	};
-    */
 
     /* Secure Element - disabled for now
 	stsafe@20 {
