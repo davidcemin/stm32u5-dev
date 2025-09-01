@@ -79,10 +79,45 @@
     */
 };
 
-/* --- PDM microphones (placeholder configuration) --- */
-/* Note: STM32U5 MDF/ADF support not yet available in Zephyr.
- * This section reserves the configuration space for future implementation.
- * The MP23DB01HPTR microphones are connected to:
- * - CLK0: PE9, CLK1: PF10  
- * - SDIN0: PE10, SDIN1: PF9
+/* --- PDM microphones configuration --- */
+/ {
+	aliases {
+		pdm-mic = &pdm_mic;
+	};
+
+	pdm_mic: pdm_microphones {
+		compatible = "pdm-microphones";
+		status = "okay";
+		
+		/* Hardware properties */
+		sample-rates = <8000 16000 32000 48000>;
+		channels = <2>;
+		bit-width = <16>;
+		
+		/* MDF peripheral pins */
+		clk0-gpios = <&gpioe 9 GPIO_ACTIVE_HIGH>;   /* PE9 - MDF1_CCK0 */
+		data0-gpios = <&gpioe 10 0>;                /* PE10 - MDF1_SDI0 */
+		clk1-gpios = <&gpiof 10 GPIO_ACTIVE_HIGH>;  /* PF10 - MDF1_CCK1 */
+		data1-gpios = <&gpiof 9 0>;                 /* PF9 - MDF1_SDI1 */
+		
+		/* MDF configuration */
+		decimation-ratio = <64>;
+		filter-order = <5>;
+		gain = <0>; /* 0 dB */
+	};
+};
+
+/* The MP23DB01HPTR microphones are connected to:
+ * - Left Mic:  CLK=PE9 (MDF1_CCK0), DATA=PE10 (MDF1_SDI0)  
+ * - Right Mic: CLK=PF10 (MDF1_CCK1), DATA=PF9 (MDF1_SDI1)
+ * 
+ * MDF1 peripheral features:
+ * - Base address: 0x40C20000
+ * - Clock: AHB1 bus, bit 11 (MDF1EN)
+ * - DMA: GPDMA1 channels
+ * - Interrupts: MDF1_FLT0 (160), MDF1_FLT1 (161)
+ * 
+ * Note: The MDF1 peripheral node would normally be defined in the main
+ * STM32U5 device tree. For now, we rely on the custom MDF driver to
+ * directly access the peripheral registers at 0x40C20000.
  */

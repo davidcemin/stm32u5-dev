@@ -5,4 +5,7 @@ menu "Custom Drivers"
 # Include sensor drivers
 rsource "sensor/Kconfig"
 
+# Include audio drivers
+rsource "audio/Kconfig"
+
 endmenu

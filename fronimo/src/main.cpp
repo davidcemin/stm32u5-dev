@@ -1,6 +1,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <stdlib.h>
+#include <math.h>
 #include "sensors/hts221.h"
 #include "sensors/iis2mdc.h"
 #include "sensors/ism330dhcx.h"
@@ -20,7 +21,7 @@ int main(void) {
     LPS22HH lps;
     VL53L5CX tof;  // Hardware detected ✅, measurements require ULD firmware
     VEML6030 als;
-    PDMMicrophones mics; // Placeholder - driver not available yet
+    PDMMicrophones mics; // Custom STM32U5 MDF driver
 
     if (!hts.isReady()) {
         LOG_ERR("HTS221 not available");
@@ -47,6 +48,24 @@ int main(void) {
     if(!als.isReady()) {
         LOG_ERR("VEML7700 (ALS) not available");
         return 0;
+    }
+
+    // Configure PDM microphones
+    if (mics.isReady()) {
+        LOG_INF("PDM microphones available - configuring...");
+        if (mics.configure(16000, 2)) {
+            LOG_INF("PDM microphones configured successfully");
+            if (mics.start()) {
+                LOG_INF("PDM microphones started");
+                mics.configure_sound_detection(true, 1000);
+            } else {
+                LOG_ERR("Failed to start PDM microphones");
+            }
+        } else {
+            LOG_ERR("Failed to configure PDM microphones");
+        }
+    } else {
+        LOG_WRN("PDM microphones not available");
     }
 
     lps.setMode(LPS22HH::Mode::ONE_SHOT);
@@ -113,6 +132,23 @@ int main(void) {
             LOG_INF("Ambient Light: %d.%02d lux",
                     (int)lux, (int)((lux - (int)lux) * 100));
         }
+
+        // Test PDM microphone sampling
+        if (mics.is_capturing()) {
+            int16_t audio_buffer[32]; // Smaller buffer for testing
+            size_t samples_read = mics.read(audio_buffer, 32);
+            if (samples_read > 0) {
+                // Calculate RMS for audio level indication
+                int32_t sum_squares = 0;
+                for (size_t i = 0; i < samples_read; i++) {
+                    sum_squares += (int32_t)audio_buffer[i] * audio_buffer[i];
+                }
+                float rms = sqrt((float)sum_squares / samples_read);
+                LOG_INF("Audio: %d samples, RMS=%d.%02d", 
+                        (int)samples_read, (int)rms, (int)((rms - (int)rms) * 100));
+            }
+        }
+        
         LOG_INF("-------------------------------------------------------------------");
         
         k_sleep(K_SECONDS(2));

@@ -1,0 +1,44 @@
+# STM32U5 MDF/ADF Audio Driver Configuration
+
+config AUDIO_STM32_MDF
+	bool "STM32 MDF (Multi-rate Digital Filter) driver"
+	default y
+	depends on SOC_FAMILY_STM32
+	select AUDIO
+	select DMA
+	select CLOCK_CONTROL
+	select PINCTRL
+	help
+	  Enable driver for STM32 MDF peripheral used for PDM microphones.
+	  This peripheral provides hardware digital filtering and decimation
+	  for PDM microphone inputs.
+
+if AUDIO_STM32_MDF
+
+config AUDIO_STM32_MDF_LOG_LEVEL
+	int "STM32 MDF driver log level"
+	depends on LOG
+	default 3
+	range 0 4
+	help
+	  Sets log level for STM32 MDF driver.
+	  Levels are:
+	  0 OFF, do not write
+	  1 ERROR, only write SYS_LOG_ERR
+	  2 WARNING, write SYS_LOG_WRN in addition to previous level
+	  3 INFO, write SYS_LOG_INF in addition to previous level
+	  4 DEBUG, write SYS_LOG_DBG in addition to previous level
+
+config AUDIO_STM32_MDF_RX_BLOCK_COUNT
+	int "RX block count"
+	default 4
+	help
+	  Number of RX blocks for audio buffering.
+
+config AUDIO_STM32_MDF_DMA_BUFFER_SIZE
+	int "DMA buffer size in bytes"
+	default 2048
+	help
+	  Size of DMA buffer for audio data transfer.
+
+endif # AUDIO_STM32_MDF
