@@ -78,3 +78,11 @@
 	};
     */
 };
+
+/* --- PDM microphones (placeholder configuration) --- */
+/* Note: STM32U5 MDF/ADF support not yet available in Zephyr.
+ * This section reserves the configuration space for future implementation.
+ * The MP23DB01HPTR microphones are connected to:
+ * - CLK0: PE9, CLK1: PF10  
+ * - SDIN0: PE10, SDIN1: PF9
+ */

@@ -7,6 +7,7 @@
 #include "sensors/lps22hh.h"
 #include "sensors/vl53l5cx.h"
 #include "sensors/veml6030.h"
+#include "sensors/pdm_mics.h"
 
 LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
 
@@ -19,6 +20,7 @@ int main(void) {
     LPS22HH lps;
     VL53L5CX tof;  // Hardware detected ✅, measurements require ULD firmware
     VEML6030 als;
+    PDMMicrophones mics; // Placeholder - driver not available yet
 
     if (!hts.isReady()) {
         LOG_ERR("HTS221 not available");

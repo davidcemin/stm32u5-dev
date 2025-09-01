@@ -15,4 +15,5 @@ target_sources(app PRIVATE  src/main.cpp
                             src/sensors/lps22hh.cpp
                             src/sensors/vl53l5cx.cpp
                             src/sensors/veml6030.cpp
+                            src/sensors/pdm_mics.cpp
 )
