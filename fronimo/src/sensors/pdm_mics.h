@@ -19,7 +19,6 @@
 class PDMMicrophones {
 private:
     const struct device* dev;
-    bool is_initialized;
     bool is_configured;
     bool is_active;
     uint32_t sample_rate;

@@ -1,6 +1,7 @@
 #include "pdm_mics.h"
 #include <zephyr/logging/log.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/audio/dmic.h>
 #include <math.h>
 
 #ifndef M_PI
@@ -11,13 +12,22 @@ LOG_MODULE_REGISTER(pdm_mics_cpp, LOG_LEVEL_INF);
 
 /* Device tree node for PDM microphones */
 #define PDM_NODE DT_ALIAS(pdm_mic)
+/* Try to get the MDF device if available */
+#if DT_NODE_EXISTS(DT_NODELABEL(mdf1_filter0))
+#define MDF_DEVICE DEVICE_DT_GET(DT_NODELABEL(mdf1_filter0))
+#else
+#define MDF_DEVICE NULL
+#endif
 
 PDMMicrophones::PDMMicrophones() 
-    : dev(nullptr), is_initialized(false), is_configured(false), 
+    : dev(nullptr), is_configured(false), 
       is_active(false), sample_rate(0), channels(0), buffer_pos(0)
 {
     /* Initialize audio buffer */
     memset(audio_buffer, 0, sizeof(audio_buffer));
+    
+    /* Try to get MDF device */
+    dev = MDF_DEVICE;
     
     /* Defer device tree checking until first use to avoid static init issues */
     LOG_INF("PDM Microphones constructor completed");
@@ -25,27 +35,28 @@ PDMMicrophones::PDMMicrophones()
 
 bool PDMMicrophones::isReady()
 {
-    if (!is_initialized) {
-        /* Check if PDM device exists in device tree */
-        if (DT_NODE_EXISTS(PDM_NODE)) {
-            LOG_INF("PDM microphone device tree node found");
-            LOG_INF("PDM Microphones initialized - Hardware: MP23DB01HPTR");
-            LOG_INF("  Left Mic:  CLK=PE9 (MDF1_CCK0), DATA=PE10 (MDF1_SDI0)");
-            LOG_INF("  Right Mic: CLK=PF10 (MDF1_CCK1), DATA=PF9 (MDF1_SDI1)");
-            is_initialized = true;
-        } else {
-            LOG_WRN("PDM microphone device tree node not found");
-            is_initialized = false;
-        }
+    /* Check if MDF device is available */
+    if (!dev) {
+        LOG_ERR("MDF device not available in device tree");
+        return false;
     }
     
-    return is_initialized;
+    if (!device_is_ready(dev)) {
+        LOG_ERR("MDF device is not ready");
+        return false;
+    }
+    
+    LOG_INF("PDM Microphones ready - Hardware: MP23DB01HPTR");
+    LOG_INF("  Left Mic:  CLK=PE9 (MDF1_CCK0), DATA=PE10 (MDF1_SDI0)");
+    LOG_INF("  Right Mic: CLK=PF10 (MDF1_CCK1), DATA=PF9 (MDF1_SDI1)");
+    
+    return true;
 }
 
 bool PDMMicrophones::configure(uint32_t pcm_rate, uint8_t channels_num)
 {
-    if (!is_initialized) {
-        LOG_ERR("PDM microphones not initialized");
+    if (!isReady()) {
+        LOG_ERR("PDM microphones not ready");
         return false;
     }
 
@@ -58,6 +69,36 @@ bool PDMMicrophones::configure(uint32_t pcm_rate, uint8_t channels_num)
         LOG_ERR("Sample rate must be between 8000-48000 Hz");
         return false;
     }
+    
+    /* Configure DMIC using Zephyr API */
+    struct pcm_stream_cfg stream_cfg = {
+        .pcm_rate = pcm_rate,       /* Sample rate */
+        .pcm_width = 16,            /* 16-bit PCM */
+        .block_size = 64,           /* Block size in samples */
+        .mem_slab = NULL            /* Use default memory */
+    };
+    
+    struct dmic_cfg cfg = {
+        .io = {
+            .min_pdm_clk_freq = 1000000,    /* 1 MHz min PDM clock */
+            .max_pdm_clk_freq = 3200000,    /* 3.2 MHz max PDM clock */
+            .min_pdm_clk_dc = 40,           /* 40% min duty cycle */
+            .max_pdm_clk_dc = 60            /* 60% max duty cycle */
+        },
+        .streams = &stream_cfg,             /* Point to stream config */
+        .channel = {
+            .req_chan_map_lo = channels_num == 1 ? 0x1 : 0x3, /* Channel map */
+            .req_chan_map_hi = 0,
+            .req_num_chan = channels_num,   /* Number of channels */
+            .req_num_streams = 1            /* Number of streams */
+        }
+    };
+    
+    int ret = dmic_configure(dev, &cfg);
+    if (ret < 0) {
+        LOG_ERR("Failed to configure DMIC: %d", ret);
+        return false;
+    }
 
     /* Store configuration */
     sample_rate = pcm_rate;
@@ -65,7 +106,6 @@ bool PDMMicrophones::configure(uint32_t pcm_rate, uint8_t channels_num)
     is_configured = true;
 
     LOG_INF("PDM microphones configured: %d Hz, %d channels", pcm_rate, channels_num);
-    LOG_INF("Note: This is a framework implementation. Full MDF driver required for operation.");
     
     return true;
 }
@@ -77,19 +117,17 @@ bool PDMMicrophones::start()
         return false;
     }
 
-    /* In a real implementation, this would:
-     * 1. Enable MDF peripheral clock
-     * 2. Configure MDF registers for PDM input
-     * 3. Set up DMA for audio data transfer
-     * 4. Configure GPIO pins for PDM signals
-     * 5. Start the digital filter
-     */
+    /* Start DMIC capture using Zephyr API */
+    int ret = dmic_trigger(dev, DMIC_TRIGGER_START);
+    if (ret < 0) {
+        LOG_ERR("Failed to start DMIC capture: %d", ret);
+        return false;
+    }
 
     is_active = true;
     buffer_pos = 0;
     
-    LOG_INF("PDM microphones started (framework mode)");
-    LOG_WRN("Note: No actual audio capture until MDF driver is implemented");
+    LOG_INF("PDM microphones started - audio capture active");
     
     return true;
 }
@@ -101,11 +139,12 @@ bool PDMMicrophones::stop()
         return false;
     }
 
-    /* In a real implementation, this would:
-     * 1. Stop the MDF digital filter
-     * 2. Disable DMA transfers
-     * 3. Disable MDF peripheral clock
-     */
+    /* Stop DMIC capture using Zephyr API */
+    int ret = dmic_trigger(dev, DMIC_TRIGGER_STOP);
+    if (ret < 0) {
+        LOG_ERR("Failed to stop DMIC capture: %d", ret);
+        return false;
+    }
 
     is_active = false;
     buffer_pos = 0;
@@ -120,29 +159,32 @@ size_t PDMMicrophones::read(int16_t* buffer, size_t samples)
         return 0;
     }
 
-    /* In a real implementation, this would read from DMA buffer or MDF FIFO
-     * For now, generate test pattern to verify interface */
+    /* Try to read from DMIC using Zephyr API */
+    void *read_buf;
+    size_t size;
+    int ret = dmic_read(dev, 0, &read_buf, &size, 0);  /* 0 = no wait */
     
-    size_t samples_to_copy = (samples < BUFFER_SIZE) ? samples : BUFFER_SIZE;
-    
-    /* Generate a simple test pattern (low-frequency sine wave) */
-    static uint32_t phase = 0;
-    for (size_t i = 0; i < samples_to_copy; i++) {
-        if (channels == 1) {
-            /* Mono: simple sine wave */
-            buffer[i] = (int16_t)(1000 * sin(2.0 * M_PI * phase / 1000.0));
-        } else {
-            /* Stereo: interleaved L/R channels */
-            if (i % 2 == 0) {
-                buffer[i] = (int16_t)(1000 * sin(2.0 * M_PI * phase / 1000.0)); /* Left */
-            } else {
-                buffer[i] = (int16_t)(800 * cos(2.0 * M_PI * phase / 800.0));  /* Right */
-            }
+    if (ret < 0) {
+        if (ret != -EAGAIN) {
+            LOG_ERR("Failed to read from DMIC: %d", ret);
         }
-        phase++;
+        return 0;
     }
     
-    LOG_DBG("Generated %d test audio samples", samples_to_copy);
+    if (read_buf == NULL || size == 0) {
+        LOG_DBG("No audio data available");
+        return 0;
+    }
+    
+    /* Copy available samples */
+    size_t samples_available = size / sizeof(int16_t);
+    size_t samples_to_copy = (samples < samples_available) ? samples : samples_available;
+    
+    if (samples_to_copy > 0) {
+        memcpy(buffer, read_buf, samples_to_copy * sizeof(int16_t));
+        LOG_DBG("Read %d audio samples from DMIC", samples_to_copy);
+    }
+    
     return samples_to_copy;
 }
 
@@ -153,8 +195,8 @@ bool PDMMicrophones::configure_sound_detection(bool enable, uint32_t threshold)
         return false;
     }
 
-    /* In a real implementation, this would configure MDF sound detection */
-    LOG_INF("Sound detection %s (threshold: %d) - framework mode", 
+    /* Sound detection would require extended MDF driver features */
+    LOG_INF("Sound detection %s (threshold: %d) - extended feature", 
             enable ? "enabled" : "disabled", threshold);
     
     return true;

@@ -20,6 +20,14 @@ extern "C" {
  * for PDM microphone interface with hardware digital filtering.
  */
 
+/* MDF audio trigger commands */
+enum audio_trigger_command {
+	AUDIO_TRIGGER_START = 0,     /**< Start audio capture */
+	AUDIO_TRIGGER_STOP,          /**< Stop audio capture */
+	AUDIO_TRIGGER_PAUSE,         /**< Pause audio capture */
+	AUDIO_TRIGGER_RESUME         /**< Resume audio capture */
+};
+
 /* MDF specific configuration structures */
 struct stm32_mdf_cfg {
 	uint32_t sample_rate;        /**< Target sample rate in Hz */
