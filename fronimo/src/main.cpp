@@ -34,22 +34,9 @@ int main(void) {
         return 0;
     }
 
-    // Demonstrate power management capabilities
-    static int cycle_count = 0;
-    const int MODE_SWITCH_INTERVAL = 10; // Switch modes every 10 cycles (20 seconds)
-    
+    lps.setMode(LPS22HH::Mode::ONE_SHOT);
+
     while (true) {
-        // Switch between power modes periodically to demonstrate
-        if (cycle_count % MODE_SWITCH_INTERVAL == 0) {
-            if (cycle_count % (MODE_SWITCH_INTERVAL * 2) == 0) {
-                LOG_INF("=== Switching to ONE-SHOT mode (power optimized) ===");
-                lps.setMode(LPS22HH::Mode::ONE_SHOT);
-            } else {
-                LOG_INF("=== Switching to CONTINUOUS mode (1 Hz) ===");
-                lps.setMode(LPS22HH::Mode::CONTINUOUS);
-            }
-        }
-        
         if (hts.sample()) {
             float temp = hts.getTemperature();
             float hum = hts.getHumidity();
@@ -101,7 +88,6 @@ int main(void) {
         }
         LOG_INF("-------------------------------------------------------------------");
         
-        cycle_count++;
         k_sleep(K_SECONDS(2));
     }
 }
