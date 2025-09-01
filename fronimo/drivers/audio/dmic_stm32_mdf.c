@@ -79,6 +79,10 @@ static int stm32_mdf_trigger(const struct device *dev, enum dmic_trigger cmd)
             data->buffer_size = data->mem_slab->info.block_size / sizeof(int32_t);
         }
 
+        /* Start MDF acquisition - use interrupt mode for now */
+        /* TODO: Need to configure MDF filter parameters properly */
+        LOG_INF("Starting MDF acquisition (buffer size: %d)", data->buffer_size);
+
         data->state = DMIC_STATE_ACTIVE;
         LOG_INF("MDF acquisition started");
         break;
@@ -87,6 +91,9 @@ static int stm32_mdf_trigger(const struct device *dev, enum dmic_trigger cmd)
         if (data->state != DMIC_STATE_ACTIVE) {
             return 0;
         }
+
+        /* Stop MDF acquisition */
+        LOG_INF("Stopping MDF acquisition");
 
         if (data->rx_buffer && data->mem_slab) {
             k_mem_slab_free(data->mem_slab, (void *)data->rx_buffer);
@@ -233,14 +240,21 @@ static int stm32_mdf_init(const struct device *dev)
 
     /* Initialize MDF HAL (now that clocks are enabled and access verified) */
     data->hmdf.Instance = config->filter_base;  /* Use filter base for HAL */
+    
+    /* Configure MDF for PDM microphone acquisition - simplified */
     data->hmdf.Init.CommonParam.ProcClockDivider = 1;
     data->hmdf.Init.CommonParam.OutputClock.Activation = ENABLE;
-    data->hmdf.Init.CommonParam.OutputClock.Pins = MDF_OUTPUT_CLOCK_0;
-    data->hmdf.Init.CommonParam.OutputClock.Divider = 4;
+    data->hmdf.Init.CommonParam.OutputClock.Pins = MDF_OUTPUT_CLOCK_0 | MDF_OUTPUT_CLOCK_1;
+    data->hmdf.Init.CommonParam.OutputClock.Divider = 8;  /* Adjust for PDM clock frequency */
+    data->hmdf.Init.CommonParam.OutputClock.Trigger.Activation = DISABLE;
+    
+    /* Serial interface for PDM data */
     data->hmdf.Init.SerialInterface.Activation = ENABLE;
     data->hmdf.Init.SerialInterface.Mode = MDF_SITF_NORMAL_SPI_MODE;
     data->hmdf.Init.SerialInterface.ClockSource = MDF_SITF_CCK0_SOURCE;
     data->hmdf.Init.SerialInterface.Threshold = 31;
+    
+    /* Filter configuration for PDM */
     data->hmdf.Init.FilterBistream = MDF_BITSTREAM0_RISING;
 
     if (HAL_MDF_Init(&data->hmdf) != HAL_OK) {

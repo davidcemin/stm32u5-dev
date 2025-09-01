@@ -14,6 +14,12 @@ LOG_MODULE_REGISTER(pdm_mics_cpp, LOG_LEVEL_INF);
 #define PDM_NODE DT_ALIAS(pdm_mic)
 #define MDF_DEVICE DEVICE_DT_GET(DT_NODELABEL(mdf1_filter0))
 
+/* Define memory slab for audio buffers */
+#define AUDIO_BLOCK_SIZE 512  /* 512 bytes per block */
+#define AUDIO_BLOCK_COUNT 4   /* 4 blocks total */
+
+K_MEM_SLAB_DEFINE(audio_mem_slab, AUDIO_BLOCK_SIZE, AUDIO_BLOCK_COUNT, 4);
+
 PDMMicrophones::PDMMicrophones() 
     : dev(nullptr), is_configured(false), 
       is_active(false), sample_rate(0), channels(0), buffer_pos(0)
@@ -70,7 +76,7 @@ bool PDMMicrophones::configure(uint32_t pcm_rate, uint8_t channels_num)
         .pcm_rate = pcm_rate,       /* Sample rate */
         .pcm_width = 16,            /* 16-bit PCM */
         .block_size = 64,           /* Block size in samples */
-        .mem_slab = NULL            /* Use default memory */
+        .mem_slab = &audio_mem_slab /* Use defined memory slab */
     };
     
     struct dmic_cfg cfg = {
