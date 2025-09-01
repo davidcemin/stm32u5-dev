@@ -6,6 +6,6 @@ menu "Custom Drivers"
 rsource "sensor/Kconfig"
 
 # Include audio drivers
-rsource "audio/Kconfig"
+rsource "audio/Kconfig.dmic_stm32_mdf"
 
 endmenu

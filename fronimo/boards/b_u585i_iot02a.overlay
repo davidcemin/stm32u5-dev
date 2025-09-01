@@ -107,12 +107,12 @@
 	};
 	
 	/* MDF1 peripheral device node */
-	mdf1_filter0: mdf@40c20000 {
+	mdf1_filter0: mdf@40025000 {
 		compatible = "st,stm32-mdf";
-		reg = <0x40c20000 0x400>;
-		interrupts = <160 0>;  /* MDF1_FLT0 interrupt */
+		reg = <0x40025000 0x400>;
+		interrupts = <121 0>;  /* MDF1_FLT0 interrupt - using available IRQ */
 		interrupt-parent = <&nvic>;
-		clocks = <&rcc STM32_CLOCK_BUS_AHB1 0x800>; /* MDF1EN bit 11 */
+		clocks = <&rcc STM32_CLOCK(AHB1, 11)>; /* MDF1EN bit 11 */
 		status = "okay";
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -122,6 +122,9 @@
 		st,channels = <2>;
 		st,sample-rate = <16000>;
 		st,decimation-ratio = <64>;
+		
+		/* TODO: Pin configuration - requires manual GPIO setup */
+		/* Pins used: PE9 (CLK), PE10 (DATA), PF10 (CLK), PF9 (DATA) */
 	};
 };
 
@@ -130,12 +133,13 @@
  * - Right Mic: CLK=PF10 (MDF1_CCK1), DATA=PF9 (MDF1_SDI1)
  * 
  * MDF1 peripheral features:
- * - Base address: 0x40C20000
+ * - Base address: 0x40025000 (main MDF peripheral)
+ * - Filter 0: 0x40025080 (filter instance)
  * - Clock: AHB1 bus, bit 11 (MDF1EN)
  * - DMA: GPDMA1 channels
- * - Interrupts: MDF1_FLT0 (160), MDF1_FLT1 (161)
+ * - Interrupts: MDF1_FLT0 (121), MDF1_FLT1 (122)
  * 
  * Note: The MDF1 peripheral node would normally be defined in the main
  * STM32U5 device tree. For now, we rely on the custom MDF driver to
- * directly access the peripheral registers at 0x40C20000.
+ * directly access the peripheral registers at 0x40025000.
  */

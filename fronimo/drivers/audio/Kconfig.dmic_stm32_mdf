@@ -1,12 +1,9 @@
 # STM32 MDF Digital Microphone configuration options
 
-# This integrates with the main Zephyr AUDIO_DMIC subsystem
-# and is included via prj.conf CONFIG_DMIC_STM32_MDF=y
-
 config DMIC_STM32_MDF
 	bool "STM32 MDF Digital Microphone Driver"
 	default y
-	depends on DT_HAS_ST_STM32_MDF_ENABLED
+	depends on SOC_FAMILY_STM32
 	select USE_STM32_HAL_MDF
 	help
 	  Enable STM32 MDF (Multi-rate Digital Filter) Digital Microphone driver.
