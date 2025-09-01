@@ -91,9 +91,42 @@ static int stm32_mdf_trigger(const struct device *dev, enum dmic_trigger cmd)
         /* Enable MDF filter for data acquisition */
         config->filter_base->DFLTCR |= MDF_DFLTCR_DFLTEN;
         
-        LOG_INF("MDF filter enabled - checking if data flows without explicit clocks");
+        /* CRITICAL: Re-enable clocks after filter enable - they get reset! */
+        LOG_INF("Re-enabling CCK0 after filter enable (clocks get reset)");
+        uint32_t gcr_before = config->base->GCR;
+        config->base->GCR |= (1 << 0);  /* CCK0EN = 1 */
+        uint32_t gcr_after = config->base->GCR;
+        LOG_INF("GCR clock re-enable: before=0x%08x, after=0x%08x", gcr_before, gcr_after);
+        
+        LOG_INF("MDF filter enabled - checking if data flows with re-enabled clocks");
         LOG_INF("The FIFO overrun suggests some data source is active");
         LOG_INF("This could be internal test mode or automatic clock generation");
+        
+        /* Since GCR clocks fail, focus on improving MDF configuration */
+        LOG_INF("Attempting improved MDF clock configuration with better timing");
+        
+        /* TIMER WORKAROUND DISABLED - testing MDF native clocks first
+         * Configure TIM1 to generate 3.072 MHz on PE9 (left mic clock)
+         * Enable TIM1 clock
+         * RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;
+         * 
+         * Configure TIM1 for PWM output at 2.048 MHz (standard PDM clock)
+         * Assuming HCLK = 160MHz, prescaler = 1, period = 78 gives ~2.05MHz
+         * TIM1->PSC = 0;  // No prescaler
+         * TIM1->ARR = 78; // Period for 2.048MHz (160MHz/78 ≈ 2.05MHz)
+         * TIM1->CCR1 = 39; // 50% duty cycle
+         * 
+         * Configure TIM1 CH1 for PWM mode 1
+         * TIM1->CCMR1 |= (6 << 4); // PWM mode 1 on CH1
+         * TIM1->CCMR1 |= (1 << 3); // Preload enable
+         * TIM1->CCER |= TIM_CCER_CC1E; // Enable CH1 output
+         * 
+         * Enable timer
+         * TIM1->CR1 |= TIM_CR1_CEN;
+         * 
+         * LOG_INF("TIM1 configured to generate 2.048MHz PWM on CH1");
+         * LOG_INF("This should provide PDM clock to left microphone via PE9/TIM1_CH1");
+         */
         
         /* Check and log current MDF status */
         uint32_t gcr = config->base->GCR;
@@ -141,6 +174,9 @@ static int stm32_mdf_read(const struct device *dev, uint8_t stream, void **buffe
 {
     struct stm32_mdf_data *data = dev->data;
     const struct stm32_mdf_config *config = dev->config;
+    
+    /* CRITICAL: Force clock enable at every read to maintain PDM clock */
+    config->base->GCR |= (1 << 0);  /* CCK0EN = 1 */
 
     if (data->state != DMIC_STATE_ACTIVE) {
         return -ENODATA;
@@ -206,6 +242,11 @@ static int stm32_mdf_read(const struct device *dev, uint8_t stream, void **buffe
         
         /* Try aggressive reading - the overrun means data is definitely flowing */
         for (size_t i = 0; i < samples_to_read && i < 200; i++) {
+            /* CRITICAL: Re-enable clock every few iterations to maintain signal */
+            if (i % 8 == 0) {
+                config->base->GCR |= (1 << 0);  /* Ensure CCK0 stays enabled */
+            }
+            
             /* Check multiple status bits for data availability */
             uint32_t fifo_status = config->filter_base->DFLTISR;
             
@@ -303,7 +344,7 @@ static int stm32_mdf_init(const struct device *dev)
     LOG_INF("GTZC SECCFGR3: 0x%08x, PRIVCFGR3: 0x%08x", sec_cfg, priv_cfg);
 
     /* Configure MDF1 clock source first - CRITICAL */
-    LOG_INF("Setting MDF1 clock source to HCLK");
+    LOG_INF("Setting MDF1 clock source to HCLK (fallback from PLL1Q)");
     LL_RCC_SetMDF1ClockSource(LL_RCC_MDF1_CLKSOURCE_HCLK);
     
     /* Wait for clock source to stabilize */
@@ -333,7 +374,7 @@ static int stm32_mdf_init(const struct device *dev)
     LL_AHB2_GRP1_EnableClock(LL_AHB2_GRP1_PERIPH_GPIOE);
     LL_AHB2_GRP1_EnableClock(LL_AHB2_GRP1_PERIPH_GPIOF);
     
-    /* PE9 - MDF1_CCK0 (Clock output) */
+    /* PE9 - MDF1_CCK0 (Clock output) - reverting to MDF control */
     LL_GPIO_SetPinMode(GPIOE, LL_GPIO_PIN_9, LL_GPIO_MODE_ALTERNATE);
     LL_GPIO_SetAFPin_8_15(GPIOE, LL_GPIO_PIN_9, LL_GPIO_AF_3);  /* AF3 for MDF */
     LL_GPIO_SetPinSpeed(GPIOE, LL_GPIO_PIN_9, LL_GPIO_SPEED_FREQ_HIGH);
